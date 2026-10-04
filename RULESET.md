@@ -1,10 +1,10 @@
-# DATN 261 Backend Rules
+# DATH 261 Backend Rules
 
 These rules define the engineering boundaries for the Learner-Oriented LMS backend.
 
 ## 1. Notion Is the Product Source of Truth
 
-The DATN 261 Notion workspace owns requirements, use cases, domain models, authorization rules, system architecture, and the conceptual data model.
+The DATH 261 Notion workspace owns requirements, use cases, domain models, authorization rules, system architecture, and the conceptual data model.
 
 Code and database migrations implement those decisions; they must not silently redefine them.
 
