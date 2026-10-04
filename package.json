@@ -1,8 +1,8 @@
 {
-  "name": "datn261-lms-backend",
+  "name": "dath261-lms-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "NestJS backend for the DATN 261 Learner-Oriented LMS.",
+  "description": "NestJS backend for the DATH 261 Learner-Oriented LMS.",
   "license": "UNLICENSED",
   "type": "module",
   "packageManager": "pnpm@12.4.2",
