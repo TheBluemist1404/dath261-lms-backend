@@ -1,8 +1,8 @@
 # Learner-Oriented LMS — Backend
 
-[![CI](https://github.com/TheBluemist1404/datn261-lms-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/TheBluemist1404/datn261-lms-backend/actions/workflows/ci.yml)
+[![CI](https://github.com/TheBluemist1404/dath261-lms-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/TheBluemist1404/dath261-lms-backend/actions/workflows/ci.yml)
 
-NestJS backend for the **DATN 261 Learner-Oriented Learning Management System**.
+NestJS backend for the **DATH 261 Learner-Oriented Learning Management System**.
 
 The system combines conventional LMS workflows with a student-owned knowledge workspace, permission-aware references to canonical course material, assessment/progress workflows, and real-time collaborative study spaces.
 
@@ -128,7 +128,7 @@ NODE_ENV=development
 PORT=3001
 CORS_ORIGIN=http://localhost:3000
 SWAGGER_ENABLED=true
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/datn261_lms
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/dath261_lms
 ```
 
 Never commit real credentials or local `.env` files.
