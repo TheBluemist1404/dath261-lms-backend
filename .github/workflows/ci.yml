@@ -29,7 +29,7 @@ jobs:
           node-version: 22.12.0
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Quality gate
         run: pnpm ci
