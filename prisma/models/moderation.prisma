@@ -1,0 +1,38 @@
+enum ReportTargetType {
+  USER
+  COURSE
+  COURSE_BLOCK
+  PAGE
+  MESSAGE
+  WORKSPACE
+}
+
+enum ReportStatus {
+  PENDING
+  DISMISSED
+  ACTION_TAKEN
+}
+
+model Report {
+  id String @id @default(cuid())
+
+  reporterId String @map("reporter_id")
+  reporter User @relation(fields: [reporterId], references: [id])
+
+  targetType ReportTargetType @map("target_type")
+  targetId String @map("target_id")
+
+  reason String
+  description String?
+
+  status ReportStatus @default(PENDING)
+
+  reviewedAt DateTime? @map("reviewed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([targetType, targetId])
+  @@index([status])
+
+  @@map("reports")
+}

@@ -1,0 +1,23 @@
+model BlockProgress {
+  id String @id @default(cuid())
+
+  enrollmentId String @map("enrollment_id")
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  courseBlockId String @map("course_block_id")
+  courseBlock CourseBlock @relation(fields: [courseBlockId], references: [id], onDelete: Cascade )
+
+  completed Boolean @default(false)
+
+  completedAt DateTime? @map("completed_at")
+  lastVisitedAt DateTime? @map("last_visited_at")
+
+  // Video position / reader position / other resume state
+  resumeData Json? @map("resume_data")
+
+  @@unique([enrollmentId, courseBlockId])
+
+  @@index([courseBlockId])
+
+  @@map("block_progress")
+}

@@ -1,0 +1,83 @@
+enum WorkspaceType {
+  PERSONAL
+  COLLABORATIVE
+}
+
+enum WorkspaceMemberRole {
+  OWNER
+  CO_OWNER
+  MEMBER
+}
+
+model Workspace {
+  id String @id @default(cuid())
+
+  name String
+  type WorkspaceType
+
+  createdById String @map("created_by_id")
+  createdBy User @relation("WorkspaceCreator", fields: [createdById], references: [id])
+
+  defaultForUser User? @relation("DefaultWorkspace")
+
+  memberships WorkspaceMembership[]
+  pages Page[]
+
+  archivedAt DateTime? @map("archived_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([createdById])
+
+  @@map("workspaces")
+}
+
+model WorkspaceMembership {
+  id String @id @default(cuid())
+
+  workspaceId String @map("workspace_id")
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  userId String @map("user_id")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role WorkspaceMemberRole
+
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  @@unique([workspaceId, userId])
+
+  @@index([userId])
+
+  @@map("workspace_memberships")
+}
+
+model Page {
+  id String @id @default(cuid())
+
+  workspaceId String @map("workspace_id")
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  title String
+
+  parentPageId String? @map("parent_page_id")
+  parentPage Page? @relation("PageTree",fields: [parentPageId], references: [id], onDelete: Cascade)
+
+  children Page[] @relation("PageTree")
+
+  // Editor document
+  // Copied course content becomes ordinary workspace content here.
+  content Json?
+
+  resourceReferences ResourceReference[]
+  messages Message[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([workspaceId])
+  @@index([parentPageId])
+
+  @@map("pages")
+}
