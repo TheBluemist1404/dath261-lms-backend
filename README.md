@@ -68,7 +68,7 @@ The Prisma schema currently contains only the PostgreSQL datasource and client g
 
 ### Requirements
 
-- Node.js **22.12+**
+- Node.js **24 LTS** (see `.nvmrc`; CI uses the same version family)
 - pnpm **12**
 - PostgreSQL
 
@@ -163,7 +163,7 @@ Do not create database entities speculatively. The reviewed Notion domain/data m
 | `pnpm lint` | Lint with Biome |
 | `pnpm format` | Format with Biome |
 | `pnpm check` | Run Biome checks |
-| `pnpm ci` | Run the complete local quality gate |
+| `pnpm run ci` | Run the complete local quality gate |
 
 ## Contribution Workflow
 

@@ -1,6 +1,8 @@
 # Repository Agent Instructions
 
-Follow the engineering boundaries in `RULESET.md` and the canonical product decisions in the DATH 261 Notion workspace.
+Before starting work, read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the project source map and implementation context, then [RULESET.md](RULESET.md) and [CONTRIBUTING.md](CONTRIBUTING.md) for engineering boundaries and workflow.
+
+Consult the relevant canonical Notion documents linked there for product/domain decisions and Figma when a task depends on UI behavior. Keep the product model in those sources and implementation context in the context file, rather than duplicating it in this instruction file.
 
 ## Commit Attribution
 

@@ -109,7 +109,7 @@ Add an abstraction when it creates a concrete boundary, supports meaningful subs
 - Real-time collaboration must include connection authorization, convergence, and reconnect tests.
 - Keep tests deterministic and independent from developer machines.
 
-Run `pnpm ci` before opening a PR.
+Run `pnpm run ci` before opening a PR.
 
 ## 12. Workflow and Traceability
 
