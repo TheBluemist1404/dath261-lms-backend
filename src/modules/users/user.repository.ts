@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { AccountStatus, Prisma, User } from '../../generated/prisma/client.js';
-import type { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+// biome-ignore lint/style/useImportType: NestJS DI requires value import
+import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import type { CreateUserData } from './types/create-user.data.js';
 
 const excludeUserFields = {

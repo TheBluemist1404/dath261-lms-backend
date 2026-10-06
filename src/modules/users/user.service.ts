@@ -2,7 +2,8 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 
 import type { AccountStatus } from '../../generated/prisma/enums.js';
 import type { CreateUserData } from './types/create-user.data.js';
-import type { UserRepository } from './user.repository.js';
+// biome-ignore lint/style/useImportType: NestJS DI requires value import
+import { UserRepository } from './user.repository.js';
 
 @Injectable()
 export class UserService {
