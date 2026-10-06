@@ -68,7 +68,7 @@ The Prisma schema currently contains only the PostgreSQL datasource and client g
 
 ### Requirements
 
-- Node.js **22.12+**
+- Node.js **24 LTS** (see `.nvmrc`; CI uses the same version family)
 - pnpm **12**
 - PostgreSQL
 

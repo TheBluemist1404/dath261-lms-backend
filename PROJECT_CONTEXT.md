@@ -59,6 +59,8 @@ Feature owners own their tests. Agree API contracts across the repos; do not tak
 
 ## Development and checks
 
+Use Node.js 24 as selected by .nvmrc; GitHub CI reads the same file. The older Node 22.12 runner failed in the Nest CLI's CommonJS/ESM dependency loading, while Node 24 builds successfully.
+
 Frontend defaults to `http://localhost:3000`, backend to `http://localhost:3001`. Application REST routes use `/api`; health is `/health`; Swagger is `/docs` when enabled. Declare environment requirements in `.env.example` and keep credentials out of tracked files.
 
 Use `pnpm run ci` for the package quality script. With pnpm 12, bare `pnpm ci` invokes clean installation. Backend checks include Biome, Prisma validation, TypeScript, unit/E2E tests, and build. Prisma commands may need local database configuration; provision test dependencies explicitly rather than relying on a developer database. On PowerShell, use `pnpm.cmd` if execution policy blocks the `.ps1` shim.
