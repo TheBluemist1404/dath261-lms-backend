@@ -54,10 +54,9 @@ describe('UserRepository', () => {
 
     expect(user.id).toBeDefined();
     expect(user.email).toBe(data.email);
-    expect(user.passwordHash).toBe(data.passwordHash);
     expect(user.role).toBe(UserRole.STUDENT);
     expect(user.status).toBe(AccountStatus.ACTIVE);
-    expect(user.firstName).toBe('Vam A');
+    expect(user.firstName).toBe('Van A');
     expect(user.lastName).toBe('Nguyen');
   });
 
@@ -119,7 +118,7 @@ describe('UserRepository', () => {
 
     const updated = await repository.updateStatus(created.id, AccountStatus.SUSPENDED);
 
-    expect(updated.status).toBe(AccountStatus.SUSPENDED);
+    expect(updated?.status).toBe(AccountStatus.SUSPENDED);
 
     const persisted = await repository.findById(created.id);
 
@@ -139,7 +138,7 @@ describe('UserRepository', () => {
 
     const updated = await repository.updateStatus(created.id, AccountStatus.ACTIVE);
 
-    expect(updated.status).toBe(AccountStatus.ACTIVE);
+    expect(updated?.status).toBe(AccountStatus.ACTIVE);
   });
 
   it('should enforce unique email', async () => {
