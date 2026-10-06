@@ -8,7 +8,6 @@ import { UserService } from '../user.service.js';
 
 describe('UserService', () => {
   let service: UserService;
-  let repository: UserRepository;
 
   const mockUserRepository = {
     create: vi.fn(),
@@ -29,7 +28,6 @@ describe('UserService', () => {
     }).compile();
 
     service = moduleRef.get<UserService>(UserService);
-    repository = moduleRef.get<UserRepository>(UserRepository);
 
     vi.clearAllMocks();
   });

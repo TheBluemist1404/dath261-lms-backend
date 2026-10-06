@@ -30,7 +30,7 @@ describe('UserRepository', () => {
   });
 
   beforeEach(async () => {
-    const result = await prisma.user.deleteMany({
+    await prisma.user.deleteMany({
       where: {
         email: {
           startsWith: 'repo-test-',
