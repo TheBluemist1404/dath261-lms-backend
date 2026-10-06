@@ -163,7 +163,7 @@ Do not create database entities speculatively. The reviewed Notion domain/data m
 | `pnpm lint` | Lint with Biome |
 | `pnpm format` | Format with Biome |
 | `pnpm check` | Run Biome checks |
-| `pnpm ci` | Run the complete local quality gate |
+| `pnpm run ci` | Run the complete local quality gate |
 
 ## Contribution Workflow
 

@@ -32,4 +32,4 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Quality gate
-        run: pnpm ci
+        run: pnpm run ci

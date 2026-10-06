@@ -78,7 +78,7 @@ Husky runs staged-file checks and typechecking. Commit messages are validated by
 Before opening a pull request:
 
 ```bash
-pnpm ci
+pnpm run ci
 ```
 
 The quality gate checks Biome, the Prisma schema, TypeScript, unit tests, E2E tests, and the production build.
