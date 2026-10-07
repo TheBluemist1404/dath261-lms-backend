@@ -136,12 +136,10 @@ describe('UserService', () => {
       });
     });
 
-    it('should return null when email does not exist', async () => {
+    it('should throw NotFoundException when email does not exist', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
 
-      const result = await service.getUserByEmail('not-found@example.com');
-
-      expect(result).toBeNull();
+      await expect(service.getUserByEmail(email)).rejects.toThrow(NotFoundException);
     });
   });
 

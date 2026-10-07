@@ -101,10 +101,10 @@ describe('UserService - integration', () => {
     expect(user).not.toHaveProperty('passwordHash');
   });
 
-  it('should return null when email does not exist', async () => {
-    const user = await service.getUserByEmail('service-integration-not-found@example.com');
-
-    expect(user).toBeNull();
+  it('should throw NotFoundException when email does not exist', async () => {
+    await expect(
+      service.getUserByEmail('service-integration-not-found@example.com'),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('should update user status to suspended', async () => {
