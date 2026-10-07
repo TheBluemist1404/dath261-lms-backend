@@ -3,17 +3,18 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AccountStatus, UserRole } from '../../../generated/prisma/enums.js';
-import { UserRepository } from '../user.repository.js';
+import { PrismaService } from '../../../infrastructure/database/prisma/prisma.service.js';
 import { UserService } from '../user.service.js';
 
 describe('UserService', () => {
   let service: UserService;
 
-  const mockUserRepository = {
-    create: vi.fn(),
-    findById: vi.fn(),
-    findByEmail: vi.fn(),
-    updateStatus: vi.fn(),
+  const mockPrisma = {
+    user: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
   };
 
   beforeEach(async () => {
@@ -21,19 +22,19 @@ describe('UserService', () => {
       providers: [
         UserService,
         {
-          provide: UserRepository,
-          useValue: mockUserRepository,
+          provide: PrismaService,
+          useValue: mockPrisma,
         },
       ],
     }).compile();
 
-    service = moduleRef.get<UserService>(UserService);
+    service = moduleRef.get(UserService);
 
     vi.clearAllMocks();
   });
 
   const mockData = {
-    email: 'service-test-create@example.com',
+    email: 'service-test@example.com',
     passwordHash: 'hashed-password',
     role: UserRole.STUDENT,
     firstName: 'Van A',
@@ -42,66 +43,101 @@ describe('UserService', () => {
 
   const mockUser = {
     id: 'test-id',
-    ...mockData,
+    email: mockData.email,
+    role: UserRole.STUDENT,
+    firstName: 'Van A',
+    lastName: 'Nguyen',
     status: AccountStatus.ACTIVE,
+    createdAt: new Date(),
+    updatedAt: new Date(),
   };
 
   describe('createUser', () => {
-    it('should create a user successfully when email is unique', async () => {
-      mockUserRepository.findByEmail.mockResolvedValue(null);
-
-      mockUserRepository.create.mockResolvedValue(mockUser);
+    it('should create a user when email is unique', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue(mockUser);
 
       const result = await service.createUser(mockData);
 
       expect(result).toEqual(mockUser);
-      expect(mockUserRepository.findByEmail).toHaveBeenCalledWith(mockData.email);
-      expect(mockUserRepository.create).toHaveBeenCalledWith(mockData);
-      expect(mockUserRepository.create).toHaveBeenCalledTimes(1);
+
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+        where: {
+          email: mockData.email,
+        },
+        omit: {
+          passwordHash: true,
+        },
+      });
+
+      expect(mockPrisma.user.create).toHaveBeenCalledWith({
+        data: {
+          email: mockData.email,
+          passwordHash: mockData.passwordHash,
+          role: mockData.role,
+          firstName: mockData.firstName,
+          lastName: mockData.lastName,
+        },
+        omit: {
+          passwordHash: true,
+        },
+      });
     });
 
     it('should throw ConflictException if email already exists', async () => {
-      mockUserRepository.findByEmail.mockResolvedValue(mockUser);
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
 
       await expect(service.createUser(mockData)).rejects.toThrow(ConflictException);
 
-      expect(mockUserRepository.create).not.toHaveBeenCalled();
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
     });
   });
 
   describe('getUserById', () => {
-    const testId = 'user-123';
+    const id = 'user-123';
 
-    it('should return the user if found', async () => {
-      mockUserRepository.findById.mockResolvedValue(mockUser);
+    it('should return the user when found', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
 
-      const result = await service.getUserById(testId);
+      const result = await service.getUserById(id);
 
       expect(result).toEqual(mockUser);
-      expect(mockUserRepository.findById).toHaveBeenCalledWith(testId);
+
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id },
+        omit: {
+          passwordHash: true,
+        },
+      });
     });
 
-    it('should throw NotFoundException if user is not found', async () => {
-      mockUserRepository.findById.mockResolvedValue(null);
+    it('should throw NotFoundException when user does not exist', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.getUserById(testId)).rejects.toThrow(NotFoundException);
+      await expect(service.getUserById(id)).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('getUserByEmail', () => {
-    const testEmail = 'service-test-create@example.com';
+    const email = 'service-test@example.com';
 
-    it('should return the user by email', async () => {
-      mockUserRepository.findByEmail.mockResolvedValue(mockUser);
+    it('should return the user when found', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
 
-      const result = await service.getUserByEmail(testEmail);
+      const result = await service.getUserByEmail(email);
 
       expect(result).toEqual(mockUser);
-      expect(mockUserRepository.findByEmail).toHaveBeenCalledWith(testEmail);
+
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+        where: { email },
+        omit: {
+          passwordHash: true,
+        },
+      });
     });
 
-    it('should return null if email is not found', async () => {
-      mockUserRepository.findByEmail.mockResolvedValue(null);
+    it('should return null when email does not exist', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
 
       const result = await service.getUserByEmail('not-found@example.com');
 
@@ -110,29 +146,47 @@ describe('UserService', () => {
   });
 
   describe('updateStatus', () => {
-    const testId = 'user-123';
-    const newStatus = AccountStatus.SUSPENDED;
+    const id = 'user-123';
 
-    it('should update and return the user status if user exists', async () => {
-      const updatedUser = { ...mockUser, status: newStatus };
+    it('should update status when user exists', async () => {
+      const updatedUser = {
+        ...mockUser,
+        status: AccountStatus.SUSPENDED,
+      };
 
-      mockUserRepository.findById.mockResolvedValue(mockUser);
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+      mockPrisma.user.update.mockResolvedValue(updatedUser);
 
-      mockUserRepository.updateStatus.mockResolvedValue(updatedUser);
-
-      const result = await service.updateStatus(testId, newStatus);
+      const result = await service.updateStatus(id, AccountStatus.SUSPENDED);
 
       expect(result).toEqual(updatedUser);
-      expect(mockUserRepository.findById).toHaveBeenCalledWith(testId);
-      expect(mockUserRepository.updateStatus).toHaveBeenCalledWith(testId, newStatus);
+
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id },
+        omit: {
+          passwordHash: true,
+        },
+      });
+
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id },
+        data: {
+          status: AccountStatus.SUSPENDED,
+        },
+        omit: {
+          passwordHash: true,
+        },
+      });
     });
 
-    it('should throw NotFoundException if user does not exist', async () => {
-      mockUserRepository.findById.mockResolvedValue(null);
+    it('should throw NotFoundException when user does not exist', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.updateStatus(testId, newStatus)).rejects.toThrow(NotFoundException);
+      await expect(service.updateStatus(id, AccountStatus.SUSPENDED)).rejects.toThrow(
+        NotFoundException,
+      );
 
-      expect(mockUserRepository.updateStatus).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
   });
 });

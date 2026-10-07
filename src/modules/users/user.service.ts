@@ -1,26 +1,42 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import type { AccountStatus, Prisma } from '../../generated/prisma/client.js';
+import type { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import type { CreateUserData } from './types/create-user.type.js';
 
-import type { AccountStatus } from '../../generated/prisma/enums.js';
-import type { CreateUserData } from './types/create-user.data.js';
-// biome-ignore lint/style/useImportType: NestJS DI requires value import
-import { UserRepository } from './user.repository.js';
-
+const excludeUserFields = {
+  passwordHash: true,
+} satisfies Prisma.UserOmit;
 @Injectable()
 export class UserService {
-  constructor(private readonly userRepository: UserRepository) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async createUser(data: CreateUserData) {
-    const existingUser = await this.userRepository.findByEmail(data.email);
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: data.email },
+      omit: { passwordHash: true },
+    });
 
     if (existingUser) {
       throw new ConflictException('Email already exists');
     }
 
-    return this.userRepository.create(data);
+    return this.prisma.user.create({
+      data: {
+        email: data.email,
+        passwordHash: data.passwordHash,
+        role: data.role,
+        firstName: data.firstName,
+        lastName: data.lastName,
+      },
+      omit: excludeUserFields,
+    });
   }
 
   async getUserById(id: string) {
-    const user = await this.userRepository.findById(id);
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      omit: excludeUserFields,
+    });
 
     if (!user) {
       throw new NotFoundException('User not found');
@@ -30,16 +46,26 @@ export class UserService {
   }
 
   async getUserByEmail(email: string) {
-    return this.userRepository.findByEmail(email);
+    return this.prisma.user.findUnique({
+      where: { email },
+      omit: excludeUserFields,
+    });
   }
 
   async updateStatus(id: string, status: AccountStatus) {
-    const user = await this.userRepository.findById(id);
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      omit: excludeUserFields,
+    });
 
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
-    return this.userRepository.updateStatus(id, status);
+    return this.prisma.user.update({
+      where: { id },
+      data: { status },
+      omit: excludeUserFields,
+    });
   }
 }
