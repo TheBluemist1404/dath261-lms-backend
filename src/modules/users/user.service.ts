@@ -4,17 +4,21 @@ import type { AccountStatus, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import type { CreateUserData } from './types/create-user.type.js';
 
-const excludeUserFields = {
+const excludePublicUserFields = {
   passwordHash: true,
 } satisfies Prisma.UserOmit;
+
+export type PublicUser = Prisma.UserGetPayload<{
+  omit: typeof excludePublicUserFields;
+}>;
 @Injectable()
 export class UserService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async createUser(data: CreateUserData) {
+  async createUser(data: CreateUserData): Promise<PublicUser> {
     const existingUser = await this.prisma.user.findUnique({
       where: { email: data.email },
-      omit: { passwordHash: true },
+      omit: excludePublicUserFields,
     });
 
     if (existingUser) {
@@ -29,14 +33,14 @@ export class UserService {
         firstName: data.firstName,
         lastName: data.lastName,
       },
-      omit: excludeUserFields,
+      omit: excludePublicUserFields,
     });
   }
 
-  async getUserById(id: string) {
+  async getUserById(id: string): Promise<PublicUser> {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      omit: excludeUserFields,
+      omit: excludePublicUserFields,
     });
 
     if (!user) {
@@ -46,17 +50,23 @@ export class UserService {
     return user;
   }
 
-  async getUserByEmail(email: string) {
-    return this.prisma.user.findUnique({
+  async getUserByEmail(email: string): Promise<PublicUser> {
+    const user = await this.prisma.user.findUnique({
       where: { email },
-      omit: excludeUserFields,
+      omit: excludePublicUserFields,
     });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return user;
   }
 
-  async updateStatus(id: string, status: AccountStatus) {
+  async updateStatus(id: string, status: AccountStatus): Promise<PublicUser> {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      omit: excludeUserFields,
+      omit: excludePublicUserFields,
     });
 
     if (!user) {
@@ -66,7 +76,7 @@ export class UserService {
     return this.prisma.user.update({
       where: { id },
       data: { status },
-      omit: excludeUserFields,
+      omit: excludePublicUserFields,
     });
   }
 }
