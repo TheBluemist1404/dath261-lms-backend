@@ -1,0 +1,19 @@
+model ResourceReference {
+  id String @id @default(cuid())
+
+  pageId String @map("page_id")
+  page Page @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  courseBlockId String @map("course_block_id")
+  courseBlock CourseBlock @relation( fields: [courseBlockId], references: [id], onDelete: Cascade)
+
+  //for video block only
+  timestampSeconds Int? @map("timestamp_seconds")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([pageId])
+  @@index([courseBlockId])
+
+  @@map("resource_references")
+}

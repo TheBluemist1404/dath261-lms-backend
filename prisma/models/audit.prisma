@@ -1,0 +1,43 @@
+enum AuditAction {
+  ACCOUNT_STATUS_CHANGED
+  COURSE_STATUS_CHANGED
+  COURSE_CREATED
+  COURSE_UPDATED
+  GRADE_RELEASED
+  REPORT_REVIEWED
+  SECURITY_EVENT
+}
+
+enum AuditEntityType {
+  USER
+  COURSE
+  COURSE_BLOCK
+  ENROLLMENT
+  QUIZ_ATTEMPT
+  ASSIGNMENT_SUBMISSION
+  WORKSPACE
+  PAGE
+  REPORT
+}
+
+model AuditEntry {
+  id String @id @default(cuid())
+
+  actorId String @map("actor_id")
+  actor User @relation("AuditActor", fields: [actorId], references: [id])
+
+  action AuditAction
+
+  entityType AuditEntityType @map("entity_type")
+  entityId String @map("entity_id")
+
+  metadata Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+
+  @@map("audit_entries")
+}

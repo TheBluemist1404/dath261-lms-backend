@@ -1,0 +1,81 @@
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum BlockType {
+  MODULE
+  TEXT
+  FILE
+  VIDEO
+  QUIZ
+  ASSIGNMENT
+}
+
+model Course {
+  id String @id @default(cuid())
+
+  title String
+  description String?
+  prerequisites String?
+
+  status CourseStatus @default(DRAFT)
+  isSuspended Boolean @default(false) @map("is_suspended")
+
+  lecturerId String @map("lecturer_id")
+  lecturer User @relation( "CourseLecturer", fields: [lecturerId], references: [id])
+
+  enrollmentStartAt DateTime? @map("enrollment_start_at")
+  enrollmentEndAt DateTime? @map("enrollment_end_at")
+
+  blocks CourseBlock[]
+  enrollments Enrollment[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([lecturerId])
+  @@index([status])
+
+  @@map("courses")
+}
+
+model CourseBlock {
+  id String @id @default(cuid())
+
+  courseId String @map("course_id")
+  course Course @relation( fields: [courseId], references: [id], onDelete: Cascade)
+
+  type BlockType
+  title String
+
+  // NULL = top-level CourseBlock
+  // non-NULL = child of a ModuleBlock
+  parentModuleId String? @map("parent_module_id")
+
+  parentModule CourseBlock? @relation("ModuleChildren", fields: [parentModuleId], references: [id], onDelete: Cascade)
+
+  children CourseBlock[] @relation("ModuleChildren")
+
+  position Int
+
+  // Type-specific payload
+  content Json?
+
+  progressEntries BlockProgress[]
+
+  quizAttempts QuizAttempt[] @relation("QuizBlockAttempts")
+
+  assignmentSubmissions AssignmentSubmission[] @relation("AssignmentBlockSubmissions")
+
+  resourceReferences ResourceReference[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([courseId])
+  @@index([parentModuleId])
+  @@index([courseId, parentModuleId, position])
+
+  @@map("course_blocks")
+}

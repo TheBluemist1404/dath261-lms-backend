@@ -1,0 +1,63 @@
+enum QuizAttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  GRADED
+}
+
+enum AssignmentSubmissionStatus {
+  SUBMITTED
+  GRADED
+}
+
+model QuizAttempt {
+  id String @id @default(cuid())
+
+  enrollmentId String @map("enrollment_id")
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  courseBlockId String @map("course_block_id")
+  quizBlock CourseBlock @relation("QuizBlockAttempts", fields: [courseBlockId], references: [id], onDelete: Cascade)
+
+  attemptNumber Int @map("attempt_number")
+
+  status QuizAttemptStatus @default(IN_PROGRESS)
+
+  answers Json?
+  score Decimal? @db.Decimal(5, 2)
+
+  startedAt DateTime @default(now()) @map("started_at")
+  submittedAt DateTime? @map("submitted_at")
+  gradedAt DateTime? @map("graded_at")
+
+  @@unique([enrollmentId, courseBlockId, attemptNumber])
+  @@index([enrollmentId])
+  @@index([courseBlockId])
+  @@map("quiz_attempts")
+}
+
+model AssignmentSubmission {
+  id String @id @default(cuid())
+
+  enrollmentId String  @map("enrollment_id")
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id],onDelete :Cascade)
+
+  courseBlockId String  @map("course_block_id")
+  assignmentBlock CourseBlock @relation("AssignmentBlockSubmissions", fields: [courseBlockId], references: [id],onDelete :Cascade)
+
+  attemptNumber Int @default(1) @map("attempt_number")
+
+  textContent  String? @map("text_content")
+  fileMetadata Json?   @map("file_metadata")
+
+  status AssignmentSubmissionStatus @default(SUBMITTED)
+
+  score    Decimal? @db.Decimal(5, 2)
+  feedback String?
+
+  submittedAt DateTime  @default(now()) @map("submitted_at")
+  gradedAt    DateTime? @map("graded_at")
+
+  @@unique([enrollmentId, courseBlockId, attemptNumber])
+  @@index([courseBlockId])
+  @@map("assignment_submissions")
+}

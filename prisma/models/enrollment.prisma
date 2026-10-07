@@ -1,0 +1,33 @@
+enum EnrollmentStatus {
+    ACTIVE
+    LEFT
+    COMPLETED
+}
+
+model Enrollment {
+    id String @id @default(cuid())
+
+    userId String @map("user_id")
+    courseId String @map("course_id")
+
+    user User @relation( fields: [userId], references: [id])
+    course Course @relation( fields: [courseId],references: [id])
+
+    status EnrollmentStatus @default(ACTIVE)
+
+    enrolledAt DateTime @default(now()) @map("enrolled_at")
+    leftAt DateTime? @map("left_at")
+    completedAt DateTime? @map("completed_at")
+
+    blockProgresses BlockProgress[]
+
+    quizAttempts QuizAttempt[]
+
+    assignmentSubmissions AssignmentSubmission[]
+
+    // One retained enrollment per Student-Course pair
+    @@unique([userId, courseId])
+    @@index([userId, status])
+    @@index([courseId, status])
+    @@map("enrollments")
+}

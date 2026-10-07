@@ -1,0 +1,19 @@
+model Message {
+  id String @id @default(cuid())
+
+  pageId String @map("page_id")
+  page   Page @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  senderId String @map("sender_id")
+  sender User @relation(fields: [senderId], references: [id])
+
+  content String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([pageId])
+  @@index([senderId])
+
+  @@map("messages")
+}
