@@ -2,6 +2,7 @@ import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module.js';
 
 async function bootstrap() {
@@ -21,6 +22,8 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  app.use(cookieParser());
 
   const corsOrigin = configService.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
 
