@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-// biome-ignore lint/style/useImportType: NestJS DI requires value import
 import { Test, TestingModule } from '@nestjs/testing';
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 
