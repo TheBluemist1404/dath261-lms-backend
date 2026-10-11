@@ -1,9 +1,9 @@
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
-import type { ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { AccountStatus } from '../../../generated/prisma/enums.js';
-import type { UserService } from '../../users/user.service.js';
+import { UserService } from '../../users/user.service.js';
 import type { AccessTokenPayload } from '../types/access-token-payload.type.js';
 import type { AuthenticatedUser } from '../types/authenticated-user.type.js';
 
