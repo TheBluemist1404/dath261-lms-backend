@@ -1,11 +1,11 @@
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
-import type { ConfigService } from '@nestjs/config';
-import type { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
 import { AccountStatus, UserRole } from '../../generated/prisma/client.js';
-import type { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
-import type { UserService } from '../users/user.service.js';
+import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { UserService } from '../users/user.service.js';
 import type { loginDto } from './dto/login.dto.js';
 import { type RegisterDto, RegisterRole } from './dto/register.dto.js';
 import type { AccessTokenPayload } from './types/access-token-payload.type.js';
