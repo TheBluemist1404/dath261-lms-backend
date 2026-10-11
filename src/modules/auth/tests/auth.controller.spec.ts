@@ -1,6 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Test, type TestingModule } from '@nestjs/testing';
+// biome-ignore lint/style/useImportType: NestJS DI requires value import
+import { Test, TestingModule } from '@nestjs/testing';
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

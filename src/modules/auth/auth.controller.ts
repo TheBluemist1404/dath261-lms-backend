@@ -23,7 +23,8 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
-import type { AuthService } from './auth.service.js';
+// biome-ignore lint/style/useImportType: NestJS DI requires value import
+import { AuthService } from './auth.service.js';
 import { Public } from './decorators/public.decorator.js';
 import type { loginDto } from './dto/login.dto.js';
 import type { RegisterDto } from './dto/register.dto.js';
