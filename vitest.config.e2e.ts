@@ -10,6 +10,7 @@ export default defineConfig({
     env: {
       NODE_ENV: 'test',
       DATABASE_URL: 'postgresql://test:test@localhost:5432/datn261_test',
+      JWT_ACCESS_SECRET: 'test-access-secret',
     },
   },
 });
