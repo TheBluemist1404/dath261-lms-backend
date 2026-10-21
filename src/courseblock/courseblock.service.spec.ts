@@ -41,6 +41,7 @@ describe('CourseBlockService - create (ownership pass)', () => {
       position: 0,
       content: { url: 'https://example.com/video.mp4' },
       parentModuleId: null,
+      // biome-ignore lint/suspicious/noExplicitAny: NestJS request object, can't type it properly
     } as any;
 
     const expectedResult = { id: 'block-1', courseId, ...dto };
@@ -71,6 +72,7 @@ describe('CourseBlockService - create (ownership pass)', () => {
       position: 2,
       content: 'Hello',
       // parentModuleId
+      // biome-ignore lint/suspicious/noExplicitAny: NestJS request object, can't type it properly
     } as any;
 
     mockPrisma.courseBlock.create.mockResolvedValue({ id: 'block-2' });
@@ -127,6 +129,7 @@ describe('CourseBlockService - update (ownership pass)', () => {
       type: 'VIDEO',
       position: 2,
       content: { url: 'https://example.com/v2.mp4' },
+      // biome-ignore lint/suspicious/noExplicitAny: NestJS request object, can't type it properly
     } as any;
 
     const existingBlock = { id: blockId, courseId, title: 'Old', position: 1 };
@@ -157,6 +160,7 @@ describe('CourseBlockService - update (ownership pass)', () => {
 
   // Partial update
   it('partial update — title', async () => {
+    // biome-ignore lint/suspicious/noExplicitAny: NestJS request object, can't type it properly
     const dto = { title: 'Only title changed' } as any;
     mockPrisma.courseBlock.findFirst.mockResolvedValue({ id: blockId, courseId });
     mockPrisma.courseBlock.update.mockResolvedValue({ id: blockId, title: 'Only title changed' });
@@ -289,6 +293,7 @@ describe('CourseBlockService - reorder (ownership pass)', () => {
     });
 
     // $transaction execute promise and return result
+    // biome-ignore lint/suspicious/noExplicitAny: NestJS request object, can't type it properly
     mockPrisma.$transaction.mockImplementation((ops: any[]) => Promise.all(ops));
   });
 
