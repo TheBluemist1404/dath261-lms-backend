@@ -25,8 +25,8 @@ import {
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import { Public } from './decorators/public.decorator.js';
-import type { loginDto } from './dto/login.dto.js';
-import type { RegisterDto } from './dto/register.dto.js';
+import { loginDto } from './dto/login.dto.js';
+import { RegisterDto } from './dto/register.dto.js';
 import { AuthTokenResponseDto } from './dto/responses/auth-token-response.dto.js';
 import { RegisterResponseDto } from './dto/responses/register-response.dto.js';
 import type { IssuedAuthTokens } from './types/issued-auth-tokens.type.js';

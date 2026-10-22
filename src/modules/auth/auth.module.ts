@@ -30,15 +30,7 @@ import { AccessTokenStrategy } from './strategies/access-token.strategy.js';
     }),
   ],
   controllers: [AuthController],
-  providers: [
-    AuthService,
-    AccessTokenStrategy,
-    {
-      provide: APP_GUARD,
-      useClass: AccessTokenGuard,
-    },
-    PrismaService,
-  ],
+  providers: [AuthService, AccessTokenStrategy, PrismaService],
   exports: [AuthService],
 })
 export class AuthModule {}
