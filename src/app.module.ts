@@ -6,6 +6,7 @@ import { HealthModule } from './health/health.module.js';
 import { DatabaseModule } from './infrastructure/database/database.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { AccessTokenGuard } from './modules/auth/guards/access-token.guard.js';
+import { PagesModule } from './modules/pages/pages.module.js';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
     HealthModule,
     AuthModule,
     WorkspacesModule,
+    PagesModule,
   ],
   providers: [
     {
