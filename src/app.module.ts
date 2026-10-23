@@ -7,6 +7,7 @@ import { HealthModule } from './health/health.module.js';
 import { DatabaseModule } from './infrastructure/database/database.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { AccessTokenGuard } from './modules/auth/guards/access-token.guard.js';
+import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -20,6 +21,7 @@ import { AccessTokenGuard } from './modules/auth/guards/access-token.guard.js';
     CourseBlockModule,
     //CourseModule,
     AuthModule,
+    WorkspacesModule,
   ],
   providers: [
     {
