@@ -30,6 +30,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
+    "db:seed:dev": "node scripts/seed-dev.mjs",
     "ci": "pnpm check && pnpm prisma:validate && pnpm typecheck && pnpm test && pnpm test:e2e && pnpm build",
     "postinstall": "prisma generate",
     "prepare": "husky"

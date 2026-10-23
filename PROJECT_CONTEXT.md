@@ -36,11 +36,13 @@ For membership roles, invitation acceptance, nested pages, live references, and 
 
 ## Workspace API status
 
-The REST contract the frontend codes against is `docs/workspace-api-contract.md` in the frontend repo (workspaces, pages, members, course references, search, recent pages). It is being implemented on `feat/workspace-api` in phases, starting 2026-10-23. Decisions approved by the Workspace owner for this work:
+The REST contract the frontend codes against is `docs/workspace-api-contract.md` in the frontend repo (workspaces, pages, members, course references, search, recent pages). It is implemented on `feat/workspace-api` (2026-10-23) in `src/modules/workspaces`, `pages`, `references` and `search`, and was checked end to end against the frontend's `feat/workspace-foundation` branch with mocks off. Decisions approved by the Workspace owner for this work:
 
 - A Student or Lecturer's personal workspace is created the first time they use the workspace API, which also sets `User.defaultWorkspaceId`. Administrators have no workspace and get `403` on workspace routes.
 - Course references read Course, CourseBlock and Enrollment through Prisma; they do not depend on the course module.
 - Out of scope for now: page archive/restore, copying course material, page discussion, and the Yjs/WebSocket collaboration server.
+
+`pnpm db:seed:dev` fills a development database with a student, a classmate and a lecturer (password `password123`), published and draft courses with FILE and VIDEO blocks, and a shared workspace with pages and references. It uses fixed ids and can be run again safely.
 
 E2E suites share one database: `test/support` provides `createTestApp` (same pipeline as `main.ts` via `configureApp`), `resetDatabase`, real-auth user helpers and course fixtures, and the E2E config runs files one at a time.
 
