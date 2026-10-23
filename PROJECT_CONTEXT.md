@@ -34,6 +34,16 @@ These are the latest user-approved clarifications from 2026-10-06; reconcile old
 
 For membership roles, invitation acceptance, nested pages, live references, and collaboration recovery, consult the Domain, Authorization, and Use Case sources above. Workspace membership does not grant access to referenced course resources; backend authorization remains authoritative.
 
+## Workspace API status
+
+The REST contract the frontend codes against is `docs/workspace-api-contract.md` in the frontend repo (workspaces, pages, members, course references, search, recent pages). It is being implemented on `feat/workspace-api` in phases, starting 2026-10-23. Decisions approved by the Workspace owner for this work:
+
+- A Student or Lecturer's personal workspace is created the first time they use the workspace API, which also sets `User.defaultWorkspaceId`. Administrators have no workspace and get `403` on workspace routes.
+- Course references read Course, CourseBlock and Enrollment through Prisma; they do not depend on the course module.
+- Out of scope for now: page archive/restore, copying course material, page discussion, and the Yjs/WebSocket collaboration server.
+
+E2E suites share one database: `test/support` provides `createTestApp` (same pipeline as `main.ts` via `configureApp`), `resetDatabase`, real-auth user helpers and course fixtures, and the E2E config runs files one at a time.
+
 ## Team boundaries
 
 | Owner | Area |
