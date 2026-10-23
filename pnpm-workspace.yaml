@@ -6,3 +6,4 @@ allowBuilds:
   "prisma": true
   "@scarf/scarf": false
   esbuild: true
+  bcrypt: true

@@ -16,7 +16,7 @@
     "rules": {
       "recommended": true,
       "style": {
-        "useImportType": "on"
+        "useImportType": "off"
       }
     }
   },
