@@ -13,6 +13,14 @@ export class PageSummaryResponseDto {
   @ApiProperty({ type: String, nullable: true })
   parentPageId!: string | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'Set while the page is archived; archived pages are read-only.',
+  })
+  archivedAt!: Date | null;
+
   @ApiProperty({ type: String, format: 'date-time' })
   createdAt!: Date;
 

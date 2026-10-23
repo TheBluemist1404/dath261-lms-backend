@@ -123,6 +123,7 @@ describe('Page search and recent pages API (e2e)', () => {
           workspaceId,
           title: 'Lecture',
           parentPageId: unit.id,
+          archivedAt: null,
           createdAt: expect.any(String),
           updatedAt: expect.any(String),
         },

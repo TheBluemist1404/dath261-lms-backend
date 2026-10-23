@@ -4,7 +4,6 @@ import { BlockType } from '../../generated/prisma/enums.js';
 import { escapeLike } from '../../infrastructure/database/prisma/like-pattern.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { PagesService } from '../pages/pages.service.js';
-import { WorkspaceAccessService } from '../workspaces/workspace-access.service.js';
 import {
   type BlockWithCourse,
   CourseBlockAccessService,
@@ -30,7 +29,6 @@ export class ReferencesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pages: PagesService,
-    private readonly workspaceAccess: WorkspaceAccessService,
     private readonly blockAccess: CourseBlockAccessService,
   ) {}
 
@@ -55,8 +53,7 @@ export class ReferencesService {
     pageId: string,
     dto: CreateReferenceDto,
   ): Promise<CourseReferenceResponseDto> {
-    const { workspace } = await this.pages.resolve(userId, pageId);
-    this.workspaceAccess.assertWritable(workspace);
+    this.pages.assertEditable(await this.pages.resolve(userId, pageId));
 
     const block = await this.prisma.courseBlock.findUnique({
       where: { id: dto.courseBlockId },
@@ -99,8 +96,7 @@ export class ReferencesService {
     }
 
     try {
-      const { workspace } = await this.pages.resolve(userId, reference.pageId);
-      this.workspaceAccess.assertWritable(workspace);
+      this.pages.assertEditable(await this.pages.resolve(userId, reference.pageId));
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw new NotFoundException('Reference not found');

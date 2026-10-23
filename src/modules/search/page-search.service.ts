@@ -11,7 +11,8 @@ type PageWithWorkspace = Page & { workspace: Workspace };
 
 /**
  * Page search and recent pages across the caller's active workspaces
- * (FR-PW-06). Archived workspaces and workspaces the caller left are excluded.
+ * (FR-PW-06). Archived pages and workspaces, and workspaces the caller left,
+ * are excluded.
  */
 @Injectable()
 export class PageSearchService {
@@ -27,11 +28,12 @@ export class PageSearchService {
       FROM pages p
       JOIN workspaces w ON w.id = p.workspace_id AND w.archived_at IS NULL
       JOIN workspace_memberships m ON m.workspace_id = w.id AND m.user_id = ${userId}
-      WHERE p.title ILIKE ${pattern}
+      WHERE p.archived_at IS NULL
+        AND (p.title ILIKE ${pattern}
          OR EXISTS (
            SELECT 1 FROM jsonb_path_query(p.content, 'lax $.**.text') AS t(value)
            WHERE jsonb_typeof(t.value) = 'string' AND t.value #>> '{}' ILIKE ${pattern}
-         )
+         ))
       ORDER BY (p.title ILIKE ${pattern}) DESC, p.updated_at DESC, p.id
       LIMIT ${SEARCH_RESULT_LIMIT}
     `;
@@ -60,6 +62,7 @@ export class PageSearchService {
   async recent(userId: string, limit: number): Promise<PageHitResponseDto[]> {
     const pages = await this.prisma.page.findMany({
       where: {
+        archivedAt: null,
         workspace: { archivedAt: null, memberships: { some: { userId } } },
       },
       include: { workspace: true },
@@ -111,6 +114,7 @@ function toHit(
       workspaceId: page.workspaceId,
       title: page.title,
       parentPageId: page.parentPageId,
+      archivedAt: page.archivedAt,
       createdAt: page.createdAt,
       updatedAt: page.updatedAt,
     },
