@@ -24,6 +24,7 @@ async function bootstrap() {
       .setTitle('DATN 261 Learner-Oriented LMS API')
       .setDescription('REST API for the DATN 261 Learner-Oriented Learning Management System.')
       .setVersion('1.0')
+      .addBearerAuth()
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);
