@@ -117,6 +117,7 @@ Backend         http://localhost:3001
 Application API http://localhost:3001/api/*
 Health          http://localhost:3001/health
 Swagger         http://localhost:3001/docs
+Collaboration   ws://localhost:3001/api/collab
 ```
 
 The frontend should use `/api` as its API base and proxy that path to the backend during local development.
