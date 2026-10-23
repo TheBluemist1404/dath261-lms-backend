@@ -46,7 +46,7 @@ const enrollments = [
   ['seed-enrollment-student-algorithms', 'seed-user-student', 'seed-course-algorithms'],
 ];
 
-// The frontend editor is still a plain-text stand-in; this is the shape it saves.
+// Plain-text content; shared pages turn it into their collaborative document on first open.
 function paragraphs(...texts) {
   return { type: 'plain-text', text: texts.join('\n\n') };
 }

@@ -8,6 +8,7 @@ import {
 import { Prisma } from '../../generated/prisma/client.js';
 import { UserRole, WorkspaceMemberRole, WorkspaceType } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { CollaborationService } from '../collaboration/collaboration.service.js';
 import type { AddMemberDto } from './dto/add-member.dto.js';
 import type { WorkspaceMemberResponseDto } from './dto/responses/workspace-member-response.dto.js';
 import { WorkspaceAccessService } from './workspace-access.service.js';
@@ -26,6 +27,7 @@ export class WorkspaceMembersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: WorkspaceAccessService,
+    private readonly collaboration: CollaborationService,
   ) {}
 
   async list(userId: string, workspaceId: string): Promise<WorkspaceMemberResponseDto[]> {
@@ -105,6 +107,7 @@ export class WorkspaceMembersService {
     }
 
     await this.prisma.workspaceMembership.delete({ where: { id: target.id } });
+    this.collaboration.revokeMember(workspaceId, targetUserId);
   }
 }
 

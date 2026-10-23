@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { type Page, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { CollaborationService } from '../collaboration/collaboration.service.js';
 import {
   type WorkspaceAccess,
   WorkspaceAccessService,
@@ -27,6 +28,7 @@ export class PagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: WorkspaceAccessService,
+    private readonly collaboration: CollaborationService,
   ) {}
 
   /** Resolves a page for a member of its workspace; anyone else gets 404. */
@@ -104,6 +106,7 @@ export class PagesService {
     this.access.assertWritable(workspace);
 
     await this.prisma.page.delete({ where: { id: pageId } });
+    await this.collaboration.pagesDeleted(workspace.id);
   }
 
   private async assertValidParent(page: Page, parentPageId: string): Promise<void> {

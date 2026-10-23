@@ -2,6 +2,7 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import type { Workspace, WorkspaceMembership } from '../../generated/prisma/client.js';
 import { WorkspaceMemberRole, WorkspaceType } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { CollaborationService } from '../collaboration/collaboration.service.js';
 import type { WorkspaceResponseDto } from './dto/responses/workspace-response.dto.js';
 import { type WorkspaceAccess, WorkspaceAccessService } from './workspace-access.service.js';
 
@@ -16,6 +17,7 @@ export class WorkspacesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: WorkspaceAccessService,
+    private readonly collaboration: CollaborationService,
   ) {}
 
   async list(userId: string, archived: boolean): Promise<WorkspaceResponseDto[]> {
@@ -72,6 +74,7 @@ export class WorkspacesService {
       where: { id: workspaceId },
       data: { archivedAt: new Date() },
     });
+    this.collaboration.workspaceStateChanged(workspaceId);
     return this.get(userId, workspaceId);
   }
 
@@ -83,6 +86,7 @@ export class WorkspacesService {
     }
 
     await this.prisma.workspace.update({ where: { id: workspaceId }, data: { archivedAt: null } });
+    this.collaboration.workspaceStateChanged(workspaceId);
     return this.get(userId, workspaceId);
   }
 

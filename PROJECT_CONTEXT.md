@@ -40,7 +40,8 @@ The REST contract the frontend codes against is `docs/workspace-api-contract.md`
 
 - A Student or Lecturer's personal workspace is created the first time they use the workspace API, which also sets `User.defaultWorkspaceId`. Administrators have no workspace and get `403` on workspace routes.
 - Course references read Course, CourseBlock and Enrollment through Prisma; they do not depend on the course module.
-- Out of scope for now: page archive/restore, copying course material, page discussion, and the Yjs/WebSocket collaboration server.
+- Shared pages sync live through a Yjs WebSocket server (Hocuspocus) attached to the API's HTTP server at `/api/collab`, in `src/modules/collaboration`. It authenticates with the REST access token, checks workspace membership per page, serves archived workspaces read-only, stores the Yjs state in `pages.yjs_state` with a plain-text `content` snapshot for search, and closes sessions when a member is removed, a page is deleted, or the workspace is archived or restored. Chosen over the y-webrtc signaling server because WebRTC cannot enforce membership or persist documents. `node scripts/bench-collab.mjs` measures edit delay between two members.
+- Out of scope for now: page archive/restore, copying course material, and page discussion.
 
 `pnpm db:seed:dev` fills a development database with a student, a classmate and a lecturer (password `password123`), published and draft courses with FILE and VIDEO blocks, and a shared workspace with pages and references. It uses fixed ids and can be run again safely.
 
@@ -65,7 +66,7 @@ Feature owners own their tests. Agree API contracts across the repos; do not tak
 - Application domains belong under `src/modules/<domain>/` as they enter implementation. Technical adapters belong under `src/infrastructure/`; controllers stay focused on transport and services own business behavior.
 - The inspected `main` baseline has health/config/database infrastructure only. Prisma has a generator and datasource, with no domain models or migrations. Other branches may contain work in progress; inspect the actual target branch before extending it.
 - Derive schema and API contracts from the reviewed Notion model. In particular, use the current CourseBlock and Workspace/Page/WorkspaceMembership models rather than the superseded fixed Module/Lesson/Resource or StudyGroup/SharedDocument hierarchies. Do not infer a database model from a Figma card or frontend preview object.
-- Authentication, domain APIs, Lexical document storage, and Yjs/WebSocket persistence are pending on this baseline. Frontend preview data and local workspace creation do not establish backend contracts.
+- Course and assessment domain APIs are pending on this baseline; workspace APIs and Yjs/WebSocket persistence exist on `feat/workspace-api`. Frontend preview data and local workspace creation do not establish backend contracts.
 - Enforce resource authorization on REST and real-time paths. A platform role alone does not establish workspace ownership, course enrollment, or referenced-resource access. Loss of membership or course access must not expose protected content through an existing connection or reference.
 - Frontend workspace auth is currently assumed. Coordinate session/current-user and resource contracts before integration; the frontend auth store is not an authorization boundary.
 
