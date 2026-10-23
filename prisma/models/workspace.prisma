@@ -70,6 +70,14 @@ model Page {
   // Copied course content becomes ordinary workspace content here.
   content Json?
 
+  // Shared document state (Yjs update) for pages in collaborative workspaces.
+  // `content` then holds a plain-text snapshot of it for search.
+  yjsState Bytes? @map("yjs_state")
+
+  // Set on an archived page and every subpage archived with it (same instant),
+  // so a restore brings back exactly that subtree.
+  archivedAt DateTime? @map("archived_at")
+
   resourceReferences ResourceReference[]
   messages Message[]
 
@@ -78,6 +86,7 @@ model Page {
 
   @@index([workspaceId])
   @@index([parentPageId])
+  @@index([workspaceId, archivedAt])
 
   @@map("pages")
 }
