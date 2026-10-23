@@ -58,6 +58,7 @@ describe('Pages API (e2e)', () => {
         workspaceId,
         title: 'Root',
         parentPageId: null,
+        archivedAt: null,
         createdAt: expect.any(String),
         updatedAt: expect.any(String),
       });
@@ -108,6 +109,7 @@ describe('Pages API (e2e)', () => {
         workspaceId,
         title: 'Week 3',
         parentPageId: null,
+        archivedAt: null,
         content: null,
         createdAt: expect.any(String),
         updatedAt: expect.any(String),
@@ -143,7 +145,7 @@ describe('Pages API (e2e)', () => {
           .set(owner.auth)
           .send({ title: 'Child', parentPageId })
           .expect(400);
-        expect(response.body.message).toBe('parentPageId must be a page in this workspace');
+        expect(response.body.message).toBe('parentPageId must be an active page in this workspace');
       }
     });
 
@@ -406,6 +408,147 @@ describe('Pages API (e2e)', () => {
       await http().delete(`/api/pages/${page.id}`).set(outsider.auth).expect(404);
       await http().delete('/api/pages/missing').set(owner.auth).expect(404);
       expect(await testApp.prisma.page.count()).toBe(1);
+    });
+  });
+
+  describe('page archive', () => {
+    const archive = (pageId: string, user: TestUser = member) =>
+      http().post(`/api/pages/${pageId}/archive`).set(user.auth);
+    const restore = (pageId: string, user: TestUser = member) =>
+      http().post(`/api/pages/${pageId}/restore`).set(user.auth);
+    const titles = async (archived: boolean) =>
+      (
+        await http()
+          .get(`/api/workspaces/${workspaceId}/pages?archived=${archived}`)
+          .set(member.auth)
+          .expect(200)
+      ).body.map((page: { title: string }) => page.title);
+
+    it('archives the page with its subtree and keeps everything for restoring', async () => {
+      const root = await insertPage(testApp, workspaceId, 'Root');
+      const child = await insertPage(testApp, workspaceId, 'Child', root.id);
+      await insertPage(testApp, workspaceId, 'Grandchild', child.id);
+      await insertPage(testApp, workspaceId, 'Sibling');
+      await testApp.prisma.page.update({
+        where: { id: child.id },
+        data: { content: lexicalState },
+      });
+
+      const response = await archive(root.id).expect(200);
+      expect(response.body).toMatchObject({ id: root.id, archivedAt: expect.any(String) });
+
+      expect(await titles(false)).toEqual(['Sibling']);
+      expect(await titles(true)).toEqual(['Root', 'Child', 'Grandchild']);
+      // Archived pages stay readable, content included.
+      const page = await http().get(`/api/pages/${child.id}`).set(member.auth).expect(200);
+      expect(page.body).toMatchObject({ content: lexicalState, archivedAt: expect.any(String) });
+    });
+
+    it('makes archived pages read-only', async () => {
+      const root = await insertPage(testApp, workspaceId, 'Root');
+      await archive(root.id).expect(200);
+
+      await http()
+        .patch(`/api/pages/${root.id}`)
+        .set(member.auth)
+        .send({ title: 'Renamed' })
+        .expect(409);
+      await http()
+        .post(`/api/workspaces/${workspaceId}/pages`)
+        .set(member.auth)
+        .send({ title: 'Under archived', parentPageId: root.id })
+        .expect(400);
+      const other = await insertPage(testApp, workspaceId, 'Other');
+      await http()
+        .patch(`/api/pages/${other.id}`)
+        .set(member.auth)
+        .send({ parentPageId: root.id })
+        .expect(400);
+      await archive(root.id).expect(409);
+    });
+
+    it('restores the subtree archived with it, but not subpages archived earlier', async () => {
+      const root = await insertPage(testApp, workspaceId, 'Root');
+      const child = await insertPage(testApp, workspaceId, 'Child', root.id);
+      const earlier = await insertPage(testApp, workspaceId, 'Archived earlier', root.id);
+      await archive(earlier.id).expect(200);
+      await archive(root.id).expect(200);
+
+      const response = await restore(root.id).expect(200);
+      expect(response.body).toMatchObject({ id: root.id, archivedAt: null, parentPageId: null });
+
+      expect(await titles(false)).toEqual(['Root', 'Child']);
+      expect(await titles(true)).toEqual(['Archived earlier']);
+      const restoredChild = await testApp.prisma.page.findUniqueOrThrow({
+        where: { id: child.id },
+      });
+      expect(restoredChild).toMatchObject({ parentPageId: root.id, archivedAt: null });
+      await restore(root.id).expect(409);
+    });
+
+    it('restores to the root while the previous parent is still archived', async () => {
+      const root = await insertPage(testApp, workspaceId, 'Root');
+      const child = await insertPage(testApp, workspaceId, 'Child', root.id);
+      await archive(root.id).expect(200);
+
+      const response = await restore(child.id).expect(200);
+      expect(response.body).toMatchObject({ parentPageId: null, archivedAt: null });
+      expect(await titles(false)).toEqual(['Child']);
+
+      // Back under its parent once that parent is active again.
+      const sibling = await insertPage(testApp, workspaceId, 'Sibling', root.id);
+      await archive(sibling.id).expect(200);
+      await restore(root.id).expect(200);
+      expect((await restore(sibling.id).expect(200)).body.parentPageId).toBe(root.id);
+    });
+
+    it('hides archived pages from search and recent pages', async () => {
+      const page = await insertPage(testApp, workspaceId, 'Graph notes');
+      await archive(page.id).expect(200);
+
+      const search = await http().get('/api/search/pages?q=Graph').set(member.auth).expect(200);
+      expect(search.body).toEqual([]);
+      const recent = await http().get('/api/recent-pages').set(member.auth).expect(200);
+      expect(recent.body).toEqual([]);
+    });
+
+    it('keeps references and messages read-only on archived pages', async () => {
+      const page = await insertPage(testApp, workspaceId, 'Page');
+      const lecturer = await registerUser(testApp, 'LECTURER');
+      const course = await createCourse(testApp, {
+        lecturerId: lecturer.id,
+        blocks: [{ type: 'FILE', title: 'Slides' }],
+      });
+      await testApp.prisma.enrollment.create({
+        data: { userId: member.id, courseId: course.id },
+      });
+      const reference = await testApp.prisma.resourceReference.create({
+        data: { pageId: page.id, courseBlockId: course.blocks[0].id },
+      });
+      await archive(page.id).expect(200);
+
+      await http().get(`/api/pages/${page.id}/references`).set(member.auth).expect(200);
+      await http()
+        .post(`/api/pages/${page.id}/references`)
+        .set(member.auth)
+        .send({ courseBlockId: course.blocks[0].id })
+        .expect(409);
+      await http().delete(`/api/references/${reference.id}`).set(member.auth).expect(409);
+      await http().get(`/api/pages/${page.id}/messages`).set(member.auth).expect(200);
+      await http()
+        .post(`/api/pages/${page.id}/messages`)
+        .set(member.auth)
+        .send({ content: 'Hello' })
+        .expect(409);
+    });
+
+    it('needs an active workspace and membership', async () => {
+      const page = await insertPage(testApp, workspaceId, 'Page');
+      await archive(page.id, outsider).expect(404);
+      await archive('missing').expect(404);
+      await archiveWorkspace(testApp, workspaceId);
+      await archive(page.id, owner).expect(409);
+      expect(await titles(true)).toEqual([]);
     });
   });
 });

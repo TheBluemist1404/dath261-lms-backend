@@ -194,4 +194,16 @@ describe('Collaboration server (e2e)', () => {
 
     expect(await a.closed).toBe('page-deleted');
   });
+
+  it('reconnects sessions on archived pages and serves them read-only', async () => {
+    const a = connect(member.accessToken);
+    expect(await a.ready).toBe('synced');
+
+    await testApp.http().post(`/api/pages/${pageId}/archive`).set(owner.auth).expect(200);
+
+    expect(await a.closed).toBe('page-changed');
+    const b = connect(member.accessToken);
+    expect(await b.ready).toBe('synced');
+    expect(b.readOnly()).toBe(true);
+  });
 });

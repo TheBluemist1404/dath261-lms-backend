@@ -30,6 +30,7 @@ export const CloseReason = {
   notCollaborative: 'not-collaborative',
   accessRevoked: 'access-revoked',
   workspaceChanged: 'workspace-changed',
+  pageChanged: 'page-changed',
   pageDeleted: 'page-deleted',
 } as const;
 
@@ -121,6 +122,17 @@ export class CollaborationService implements OnApplicationBootstrap, BeforeAppli
     this.closeWhere((context) => context.workspaceId === workspaceId, CloseReason.workspaceChanged);
   }
 
+  /** Reconnects sessions on archived or restored pages to apply the new scope. */
+  pagesChanged(pageIds: string[]): void {
+    const changed = new Set(pageIds);
+    for (const [name, document] of this.hocuspocus.documents) {
+      if (!changed.has(parseDocumentName(name).pageId)) continue;
+      for (const connection of connectionsOf(document)) {
+        connection.close({ code: 4403, reason: CloseReason.pageChanged });
+      }
+    }
+  }
+
   /** Pushes a newly posted message to everyone viewing the page discussion. */
   broadcastMessage(pageId: string, message: unknown): void {
     const event: MessageCreatedEvent = { type: 'message.created', message };
@@ -193,6 +205,7 @@ export class CollaborationService implements OnApplicationBootstrap, BeforeAppli
         where: { id: pageId },
         select: {
           workspaceId: true,
+          archivedAt: true,
           workspace: {
             select: {
               type: true,
@@ -215,7 +228,8 @@ export class CollaborationService implements OnApplicationBootstrap, BeforeAppli
     }
 
     // Discussion channels only receive broadcasts; messages are posted over REST.
-    connectionConfig.readOnly = discussion || page.workspace.archivedAt !== null;
+    connectionConfig.readOnly =
+      discussion || page.archivedAt !== null || page.workspace.archivedAt !== null;
     return { userId: payload.sub, workspaceId: page.workspaceId };
   }
 

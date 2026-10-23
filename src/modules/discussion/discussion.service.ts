@@ -49,8 +49,10 @@ export class DiscussionService {
     dto: CreateMessageDto,
   ): Promise<PageMessageResponseDto> {
     const access = await this.resolveDiscussion(userId, pageId);
-    if (access.workspace.archivedAt) {
-      throw new ConflictException('Restore the workspace before posting');
+    if (access.workspace.archivedAt || access.page.archivedAt) {
+      throw new ConflictException(
+        `Restore the ${access.workspace.archivedAt ? 'workspace' : 'page'} before posting`,
+      );
     }
 
     const message = toResponse(
