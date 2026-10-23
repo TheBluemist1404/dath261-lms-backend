@@ -33,6 +33,24 @@ export const CloseReason = {
   pageDeleted: 'page-deleted',
 } as const;
 
+/**
+ * Documents named `discussion:<pageId>` carry no content: clients subscribe to
+ * them to receive new discussion messages as stateless broadcasts.
+ */
+export const DISCUSSION_PREFIX = 'discussion:';
+
+/** Stateless payload sent to discussion subscribers when a message is posted. */
+export interface MessageCreatedEvent {
+  type: 'message.created';
+  message: unknown;
+}
+
+function parseDocumentName(name: string): { pageId: string; discussion: boolean } {
+  return name.startsWith(DISCUSSION_PREFIX)
+    ? { pageId: name.slice(DISCUSSION_PREFIX.length), discussion: true }
+    : { pageId: name, discussion: false };
+}
+
 export interface CollaborationContext {
   userId: string;
   workspaceId: string;
@@ -103,6 +121,14 @@ export class CollaborationService implements OnApplicationBootstrap, BeforeAppli
     this.closeWhere((context) => context.workspaceId === workspaceId, CloseReason.workspaceChanged);
   }
 
+  /** Pushes a newly posted message to everyone viewing the page discussion. */
+  broadcastMessage(pageId: string, message: unknown): void {
+    const event: MessageCreatedEvent = { type: 'message.created', message };
+    this.hocuspocus.documents
+      .get(`${DISCUSSION_PREFIX}${pageId}`)
+      ?.broadcastStateless(JSON.stringify(event));
+  }
+
   /** Closes sessions on pages that no longer exist after a (subtree) delete. */
   async pagesDeleted(workspaceId: string): Promise<void> {
     const open = [...this.hocuspocus.documents.keys()];
@@ -110,13 +136,13 @@ export class CollaborationService implements OnApplicationBootstrap, BeforeAppli
     const remaining = new Set(
       (
         await this.prisma.page.findMany({
-          where: { id: { in: open }, workspaceId },
+          where: { id: { in: open.map((name) => parseDocumentName(name).pageId) }, workspaceId },
           select: { id: true },
         })
       ).map((page) => page.id),
     );
     for (const name of open) {
-      if (remaining.has(name)) continue;
+      if (remaining.has(parseDocumentName(name).pageId)) continue;
       const document = this.hocuspocus.documents.get(name);
       for (const connection of connectionsOf(document)) {
         if (connection.context.workspaceId === workspaceId) {
@@ -160,10 +186,11 @@ export class CollaborationService implements OnApplicationBootstrap, BeforeAppli
       throw new RefusedError(CloseReason.tokenInvalid);
     }
 
+    const { pageId, discussion } = parseDocumentName(documentName);
     const [user, page] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: payload.sub }, select: { status: true } }),
       this.prisma.page.findUnique({
-        where: { id: documentName },
+        where: { id: pageId },
         select: {
           workspaceId: true,
           workspace: {
@@ -187,11 +214,14 @@ export class CollaborationService implements OnApplicationBootstrap, BeforeAppli
       throw new RefusedError(CloseReason.notCollaborative);
     }
 
-    connectionConfig.readOnly = page.workspace.archivedAt !== null;
+    // Discussion channels only receive broadcasts; messages are posted over REST.
+    connectionConfig.readOnly = discussion || page.workspace.archivedAt !== null;
     return { userId: payload.sub, workspaceId: page.workspaceId };
   }
 
-  private async fetchState(pageId: string): Promise<Uint8Array | null> {
+  private async fetchState(documentName: string): Promise<Uint8Array | null> {
+    const { pageId, discussion } = parseDocumentName(documentName);
+    if (discussion) return null;
     const page = await this.prisma.page.findUnique({
       where: { id: pageId },
       select: { content: true, yjsState: true },
@@ -210,6 +240,7 @@ export class CollaborationService implements OnApplicationBootstrap, BeforeAppli
   }
 
   private async storeState(pageId: string, state: Buffer, document: Y.Doc): Promise<void> {
+    if (parseDocumentName(pageId).discussion) return;
     // updateMany: the page may have been deleted while the store was debounced.
     await this.prisma.page.updateMany({
       where: { id: pageId },
