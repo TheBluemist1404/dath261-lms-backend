@@ -41,7 +41,8 @@ The REST contract the frontend codes against is `docs/workspace-api-contract.md`
 - A Student or Lecturer's personal workspace is created the first time they use the workspace API, which also sets `User.defaultWorkspaceId`. Administrators have no workspace and get `403` on workspace routes.
 - Course references read Course, CourseBlock and Enrollment through Prisma; they do not depend on the course module.
 - Shared pages sync live through a Yjs WebSocket server (Hocuspocus) attached to the API's HTTP server at `/api/collab`, in `src/modules/collaboration`. It authenticates with the REST access token, checks workspace membership per page, serves archived workspaces read-only, stores the Yjs state in `pages.yjs_state` with a plain-text `content` snapshot for search, and closes sessions when a member is removed, a page is deleted, or the workspace is archived or restored. Chosen over the y-webrtc signaling server because WebRTC cannot enforce membership or persist documents. `node scripts/bench-collab.mjs` measures edit delay between two members.
-- Out of scope for now: page archive/restore, copying course material, and page discussion.
+- Page discussion (`src/modules/discussion`): `GET/POST /pages/:pageId/messages` on shared pages and `POST /reports` for messages. New messages are pushed to subscribers of the `discussion:<pageId>` channel on `/api/collab`.
+- Out of scope for now: page archive/restore and copying course material.
 
 `pnpm db:seed:dev` fills a development database with a student, a classmate and a lecturer (password `password123`), published and draft courses with FILE and VIDEO blocks, and a shared workspace with pages and references. It uses fixed ids and can be run again safely.
 
