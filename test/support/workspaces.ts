@@ -32,3 +32,13 @@ export async function archiveWorkspace(testApp: TestApp, workspaceId: string) {
     data: { archivedAt: new Date() },
   });
 }
+
+/** Creates a page directly, for tests that are not about creating pages. */
+export async function insertPage(
+  testApp: TestApp,
+  workspaceId: string,
+  title: string,
+  parentPageId: string | null = null,
+) {
+  return testApp.prisma.page.create({ data: { workspaceId, title, parentPageId } });
+}
