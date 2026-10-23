@@ -8,6 +8,7 @@ import { DatabaseModule } from './infrastructure/database/database.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { AccessTokenGuard } from './modules/auth/guards/access-token.guard.js';
 import { PagesModule } from './modules/pages/pages.module.js';
+import { ReferencesModule } from './modules/references/references.module.js';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
     AuthModule,
     WorkspacesModule,
     PagesModule,
+    ReferencesModule,
   ],
   providers: [
     {
