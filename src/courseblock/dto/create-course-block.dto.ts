@@ -1,10 +1,8 @@
 import { IsEnum, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Min } from 'class-validator';
 import { BlockType } from '../../generated/prisma/client.js';
+import { Prisma } from '../../generated/prisma/client.js';
 
 export class CreateCourseBlockDto {
-  @IsString()
-  courseId: string;
-
   @IsEnum(BlockType)
   type: BlockType;
 
@@ -12,15 +10,11 @@ export class CreateCourseBlockDto {
   @IsNotEmpty()
   title: string;
 
-  @IsInt()
-  @Min(0)
-  position: number;
-
   @IsOptional()
   @IsObject()
-  content?: Record<string, undefined>;
+  content?: Prisma.InputJsonValue;
 
   @IsOptional()
   @IsString()
-  parentModuleId?: string;
+  parentModuleId?: string | null;
 }
