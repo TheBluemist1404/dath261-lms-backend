@@ -6,7 +6,7 @@ import { createHash, randomBytes } from 'crypto';
 import { AccountStatus, UserRole } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { UserService } from '../users/user.service.js';
-import type { loginDto } from './dto/login.dto.js';
+import type { LoginDto } from './dto/login.dto.js';
 import { type RegisterDto, RegisterRole } from './dto/register.dto.js';
 import type { AccessTokenPayload } from './types/access-token-payload.type.js';
 import type { IssuedAuthTokens } from './types/issued-auth-tokens.type.js';
@@ -25,7 +25,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
   ) {}
 
-  async login(dto: loginDto): Promise<IssuedAuthTokens> {
+  async login(dto: LoginDto): Promise<IssuedAuthTokens> {
     const email = dto.email.trim().toLowerCase();
     const password = dto.password;
 

@@ -25,7 +25,7 @@ import {
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import { Public } from './decorators/public.decorator.js';
-import { loginDto } from './dto/login.dto.js';
+import { LoginDto } from './dto/login.dto.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { AuthTokenResponseDto } from './dto/responses/auth-token-response.dto.js';
 import { RegisterResponseDto } from './dto/responses/register-response.dto.js';
@@ -102,7 +102,7 @@ export class AuthController {
     description: 'The account is suspended.',
   })
   async login(
-    @Body() dto: loginDto,
+    @Body() dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthTokenResponseDto> {
     const data: IssuedAuthTokens = await this.authService.login(dto);
