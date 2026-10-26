@@ -1,6 +1,17 @@
 // courseblock.controller.ts
-import { Body, HttpCode, HttpStatus, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
-import { 
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Req,
+} from '@nestjs/common';
+import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -9,27 +20,23 @@ import {
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
-  ApiOperation, 
-  ApiParam, 
+  ApiOperation,
+  ApiParam,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { CourseBlockService } from './courseblock.service.js';
-import { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
-import { UpdateCourseBlockDto } from './dto/update-course-block.dto.js';
-import { ReorderCourseBlocksDto } from './dto/reorder-course-block.dto.js';
-import { CourseBlockResponseDto } from './dto/course-block-response.dto.js';
 import type { AuthenticatedUser } from '../modules/auth/types/authenticated-user.type.js';
-
+import { CourseBlockService } from './courseblock.service.js';
+import { CourseBlockResponseDto } from './dto/course-block-response.dto.js';
+import { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
+import { ReorderCourseBlocksDto } from './dto/reorder-course-block.dto.js';
+import { UpdateCourseBlockDto } from './dto/update-course-block.dto.js';
 
 @ApiTags('Course Block')
 @ApiBearerAuth('access-token') // Display token
 @Controller('courseblock')
-
 export class CourseBlockController {
   constructor(private courseBlockSerivice: CourseBlockService) {}
-
-
 
   @Get('/get-all/:courseId')
   @ApiOperation({ summary: 'Get all course blocks for a specific course' })
@@ -41,11 +48,9 @@ export class CourseBlockController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token.' })
   @ApiForbiddenResponse({ description: 'You do not own this course.' })
   @ApiNotFoundResponse({ description: 'Course not found.' })
-  findAll(@Param('courseId') courseId: string, @Req() req: AuthenticatedUser) {
-    return this.courseBlockSerivice.findAll(courseId, req.userId);
+  findAll(@Param('courseId') courseId: string, @Req() req: { user: AuthenticatedUser }) {
+    return this.courseBlockSerivice.findAll(courseId, req.user.userId);
   }
-
-
 
   @Post('/create/:courseId')
   @HttpCode(HttpStatus.CREATED)
@@ -60,17 +65,18 @@ export class CourseBlockController {
     type: CourseBlockResponseDto,
   })
   @ApiBadRequestResponse({
-    description:
-      'Invalid input (parent module not in same course, parent block is not a MODULE).',
+    description: 'Invalid input (parent module not in same course, parent block is not a MODULE).',
   })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token.' })
   @ApiForbiddenResponse({ description: 'You do not own this course.' })
   @ApiNotFoundResponse({ description: 'Course not found.' })
-  create(@Param('courseId') courseId: string, @Req() req: AuthenticatedUser, @Body() dto: CreateCourseBlockDto) {
-    return this.courseBlockSerivice.create(courseId, req.userId, dto);
+  create(
+    @Param('courseId') courseId: string,
+    @Req() req: { user: AuthenticatedUser },
+    @Body() dto: CreateCourseBlockDto,
+  ) {
+    return this.courseBlockSerivice.create(courseId, req.user.userId, dto);
   }
-
-
 
   @ApiOperation({ summary: 'Update a specific course block in a course' })
   @ApiParam({ name: 'courseId', description: 'The ID of the course', example: 'clx456def' })
@@ -80,8 +86,7 @@ export class CourseBlockController {
     type: CourseBlockResponseDto,
   })
   @ApiBadRequestResponse({
-    description:
-      'Invalid input (trying to change a MODULE with children to another type).',
+    description: 'Invalid input (trying to change a MODULE with children to another type).',
   })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token.' })
   @ApiForbiddenResponse({ description: 'You do not own this course.' })
@@ -90,13 +95,11 @@ export class CourseBlockController {
   update(
     @Param('courseId') courseId: string,
     @Param('blockId') blockId: string,
-    @Req() req: AuthenticatedUser,
+    @Req() req: { user: AuthenticatedUser },
     @Body() dto: UpdateCourseBlockDto,
   ) {
-    return this.courseBlockSerivice.update(courseId, blockId, req.userId, dto);
+    return this.courseBlockSerivice.update(courseId, blockId, req.user.userId, dto);
   }
-
-
 
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
@@ -111,12 +114,14 @@ export class CourseBlockController {
   @ApiForbiddenResponse({ description: 'You do not own this course.' })
   @ApiNotFoundResponse({ description: 'Course or course block not found.' })
   @Delete('delete/:courseId/:blockId')
-  remove(@Param('courseId') courseId: string, @Param('blockId') blockId: string, @Req() req: AuthenticatedUser) {
-    return this.courseBlockSerivice.remove(courseId, blockId, req.userId);
+  remove(
+    @Param('courseId') courseId: string,
+    @Param('blockId') blockId: string,
+    @Req() req: { user: AuthenticatedUser },
+  ) {
+    return this.courseBlockSerivice.remove(courseId, blockId, req.user.userId);
   }
 
-
-  
   @ApiOperation({ summary: 'Reorder course blocks within a specific course' })
   @ApiParam({ name: 'courseId', description: 'The ID of the course', example: 'clx456def' })
   @ApiOkResponse({
@@ -132,7 +137,11 @@ export class CourseBlockController {
   @ApiNotFoundResponse({ description: 'Course not found.' })
   @ApiInternalServerErrorResponse({ description: 'Transaction failed while reordering.' })
   @Patch('reorder/:courseId')
-  reorder(@Param('courseId') courseId: string, @Body() dto: ReorderCourseBlocksDto, @Req() req: AuthenticatedUser) {
-    return this.courseBlockSerivice.reorder(courseId, dto.blockIds, req.userId);
+  reorder(
+    @Param('courseId') courseId: string,
+    @Body() dto: ReorderCourseBlocksDto,
+    @Req() req: { user: AuthenticatedUser },
+  ) {
+    return this.courseBlockSerivice.reorder(courseId, dto.blockIds, req.user.userId);
   }
 }

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { BlockType } from '../../generated/prisma/enums.js'; 
+import { BlockType } from '../../generated/prisma/enums.js';
 
 export class CourseBlockResponseDto {
   @ApiProperty({ description: 'Unique identifier of the course block', example: 'clx123abc' })
@@ -17,7 +17,11 @@ export class CourseBlockResponseDto {
   @ApiProperty({ description: 'Order position within its parent list', example: 0 })
   position: number;
 
-  @ApiPropertyOptional({ description: 'Content of the block (markdown/html)', example: '# Welcome', nullable: true })
+  @ApiPropertyOptional({
+    description: 'Content of the block (markdown/html)',
+    example: '# Welcome',
+    nullable: true,
+  })
   content: string | null;
 
   @ApiPropertyOptional({

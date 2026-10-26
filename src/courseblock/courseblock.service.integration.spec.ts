@@ -2,10 +2,10 @@
 import { ConfigModule } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Prisma } from '../generated/prisma/client.js';
 import { BlockType, UserRole } from '../generated/prisma/enums.js';
 import { PrismaService } from '../infrastructure/database/prisma/prisma.service.js';
 import { CourseBlockService } from './courseblock.service.js';
-import { Prisma } from '../generated/prisma/client.js';
 
 const PREFIX = 'courseblock-integration-';
 
@@ -132,15 +132,15 @@ describe('CourseBlockService - integration', () => {
     });
 
     it('should throw NotFoundException when course does not exist', async () => {
-      await expect(
-        service.findAll('non-existent-course', lecturerA.id),
-      ).rejects.toThrow('Course not found');
+      await expect(service.findAll('non-existent-course', lecturerA.id)).rejects.toThrow(
+        'Course not found',
+      );
     });
 
     it('should throw ForbiddenException when lecturer does not own the course', async () => {
-      await expect(
-        service.findAll(courseA.id, lecturerB.id),
-      ).rejects.toThrow('You do not own this course');
+      await expect(service.findAll(courseA.id, lecturerB.id)).rejects.toThrow(
+        'You do not own this course',
+      );
     });
   });
 
@@ -325,9 +325,9 @@ describe('CourseBlockService - integration', () => {
     });
 
     it('should throw NotFoundException when block does not exist', async () => {
-      await expect(
-        service.remove(courseA.id, 'non-existent-block', lecturerA.id),
-      ).rejects.toThrow('Course block not found');
+      await expect(service.remove(courseA.id, 'non-existent-block', lecturerA.id)).rejects.toThrow(
+        'Course block not found',
+      );
     });
 
     it('should cascade delete children when removing a MODULE', async () => {
@@ -353,11 +353,7 @@ describe('CourseBlockService - integration', () => {
       const b = await createBlock({ position: 1, title: 'B' });
       const c = await createBlock({ position: 2, title: 'C' });
 
-      const result = await service.reorder(
-        courseA.id,
-        [c.id, b.id, a.id],
-        lecturerA.id,
-      );
+      const result = await service.reorder(courseA.id, [c.id, b.id, a.id], lecturerA.id);
 
       expect(result.map((r) => r.id)).toEqual([c.id, b.id, a.id]);
 
@@ -387,9 +383,9 @@ describe('CourseBlockService - integration', () => {
     it('should reject duplicate ids', async () => {
       const a = await createBlock({ position: 0 });
 
-      await expect(
-        service.reorder(courseA.id, [a.id, a.id], lecturerA.id),
-      ).rejects.toThrow('Duplicate block IDs are not allowed');
+      await expect(service.reorder(courseA.id, [a.id, a.id], lecturerA.id)).rejects.toThrow(
+        'Duplicate block IDs are not allowed',
+      );
     });
 
     it('should reject ids that belong to another course', async () => {
@@ -399,9 +395,9 @@ describe('CourseBlockService - integration', () => {
         position: 0,
       });
 
-      await expect(
-        service.reorder(courseA.id, [a.id, foreign.id], lecturerA.id),
-      ).rejects.toThrow('Some blocks do not belong to this course');
+      await expect(service.reorder(courseA.id, [a.id, foreign.id], lecturerA.id)).rejects.toThrow(
+        'Some blocks do not belong to this course',
+      );
     });
 
     it('should reject blocks with different parentModuleId', async () => {
@@ -409,9 +405,9 @@ describe('CourseBlockService - integration', () => {
       const root = await createBlock({ position: 0 });
       const child = await createBlock({ position: 0, parentModuleId: module.id });
 
-      await expect(
-        service.reorder(courseA.id, [root.id, child.id], lecturerA.id),
-      ).rejects.toThrow('All blocks must belong to the same sibling list');
+      await expect(service.reorder(courseA.id, [root.id, child.id], lecturerA.id)).rejects.toThrow(
+        'All blocks must belong to the same sibling list',
+      );
     });
 
     it('should reject incomplete sibling list', async () => {
@@ -419,9 +415,9 @@ describe('CourseBlockService - integration', () => {
       await createBlock({ position: 1 });
       await createBlock({ position: 2 });
 
-      await expect(
-        service.reorder(courseA.id, [a.id], lecturerA.id),
-      ).rejects.toThrow('You must provide all blocks in the parent module');
+      await expect(service.reorder(courseA.id, [a.id], lecturerA.id)).rejects.toThrow(
+        'You must provide all blocks in the parent module',
+      );
     });
   });
 });

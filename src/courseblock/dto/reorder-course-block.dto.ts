@@ -1,4 +1,4 @@
-import { ArrayUnique, IsArray, IsString, ArrayMinSize } from 'class-validator';
+import { ArrayMinSize, ArrayUnique, IsArray, IsString } from 'class-validator';
 
 export class ReorderCourseBlocksDto {
   @IsArray()

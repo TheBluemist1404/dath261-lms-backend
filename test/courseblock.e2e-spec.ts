@@ -1,8 +1,8 @@
 // test/courseblock.e2e-spec.ts
 import { BlockType } from '../src/generated/prisma/enums.js';
+import { createCourse } from './support/courses.js';
 import { createTestApp, resetDatabase, type TestApp } from './support/test-app.js';
 import { registerUser, type TestUser } from './support/users.js';
-import { createCourse } from './support/courses.js';
 
 describe('CourseBlock (e2e)', () => {
   let testApp: TestApp;
@@ -54,10 +54,7 @@ describe('CourseBlock (e2e)', () => {
   // ---------------------------------------------------------------------------
   describe('auth', () => {
     it('should return 401 when no token is provided', async () => {
-      await testApp
-        .http()
-        .get(`/api/courseblock/get-all/${courseAId}`)
-        .expect(401);
+      await testApp.http().get(`/api/courseblock/get-all/${courseAId}`).expect(401);
     });
 
     it('should return 403 when lecturer does not own the course', async () => {

@@ -112,7 +112,7 @@ describe('CourseBlockService - create (ownership pass)', () => {
       title: 'Chapter 3',
       type: 'TEXT',
       content: 'Hi',
-    } as any;
+    } as CreateCourseBlockDto;
   
     await service.create(courseId, lecturerId, dto);
   
@@ -542,8 +542,11 @@ describe('CourseBlockService - remove', () => {
 describe('CourseBlockService - reorder', () => {
   let service: CourseBlockService;
 
-  // Mock Prisma: chỉ khai báo method mà reorder() dùng tới
+  // Mock Prisma: khai báo method mà reorder() + checkCourseOwnership() dùng tới
   const mockPrisma = {
+    course: {
+      findUnique: vi.fn(),
+    },
     courseBlock: {
       findMany: vi.fn(),
       update: vi.fn(),
@@ -565,8 +568,13 @@ describe('CourseBlockService - reorder', () => {
     service = module.get<CourseBlockService>(CourseBlockService);
     vi.clearAllMocks();
 
-    // Mặc định: $transaction chạy callback với tx = mockPrisma
-    // (reorder dùng callback-style transaction, không phải array-style)
+    // Mặc định: course tồn tại và thuộc lecturerId -> checkCourseOwnership pass
+    mockPrisma.course.findUnique.mockResolvedValue({
+      id: courseId,
+      lecturerId,
+    });
+
+    // $transaction chạy callback với tx = mockPrisma (callback-style)
     mockPrisma.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) => {
       return cb(mockPrisma);
     });
@@ -600,19 +608,18 @@ describe('CourseBlockService - reorder', () => {
     it('should reorder 3 sibling blocks and return reordered result', async () => {
       const blockIds = ['block-a', 'block-b', 'block-c'];
 
-      // Lần findMany 1: các block được yêu cầu (cùng parent = null)
       mockPrisma.courseBlock.findMany
         .mockResolvedValueOnce(buildRequestedBlocks(blockIds))
-        // Lần findMany 2: tất cả siblings cùng parent
         .mockResolvedValueOnce(buildSiblings(blockIds));
 
-      // Giai đoạn 1 (tạm) + giai đoạn 2 (chính thức) = 6 lần update
       mockPrisma.courseBlock.update.mockResolvedValue({});
 
       const result = await service.reorder(courseId, blockIds, lecturerId);
 
-      // Kết quả trả về là mảng 3 block ở giai đoạn 2
       expect(result).toHaveLength(3);
+      expect(mockPrisma.course.findUnique).toHaveBeenCalledWith({
+        where: { id: courseId },
+      });
     });
 
     it('should reorder a single block (position = 0)', async () => {
@@ -630,14 +637,12 @@ describe('CourseBlockService - reorder', () => {
     });
 
     it('should assign final positions by index of blockIds, not by DB position', async () => {
-      // blockIds yêu cầu: c, a, b -> position cuối: c=0, a=1, b=2
       const blockIds = ['block-c', 'block-a', 'block-b'];
 
       mockPrisma.courseBlock.findMany
         .mockResolvedValueOnce(buildRequestedBlocks(blockIds))
         .mockResolvedValueOnce(buildSiblings(['block-a', 'block-b', 'block-c']));
 
-      // mock update trả về object bất kỳ để push vào mảng kết quả
       mockPrisma.courseBlock.update.mockImplementation(
         async ({ where, data }: { where: { id: string }; data: { position: number } }) => ({
           id: where.id,
@@ -647,8 +652,6 @@ describe('CourseBlockService - reorder', () => {
 
       const result = await service.reorder(courseId, blockIds, lecturerId);
 
-      // Kiểm tra 3 lần update giai đoạn 2 (bỏ qua 3 lần giai đoạn 1)
-      // Tổng cộng 6 lần update: 3 tạm + 3 chính thức
       const finalCalls = mockPrisma.courseBlock.update.mock.calls.slice(3);
       expect(finalCalls[0]).toEqual([
         { where: { id: 'block-c' }, data: { position: 0 } },
@@ -669,7 +672,37 @@ describe('CourseBlockService - reorder', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Nhóm 2: Validation — duplicate IDs
+  // Nhóm 2: checkCourseOwnership — course không tồn tại / không sở hữu
+  // ---------------------------------------------------------------------------
+  describe('ownership check', () => {
+    it('should throw NotFoundException when course does not exist', async () => {
+      mockPrisma.course.findUnique.mockResolvedValueOnce(null);
+
+      await expect(
+        service.reorder(courseId, ['block-a'], lecturerId),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('should throw ForbiddenException when lecturer does not own the course', async () => {
+      mockPrisma.course.findUnique.mockResolvedValueOnce({
+        id: courseId,
+        lecturerId: 'other-lecturer',
+      });
+
+      await expect(
+        service.reorder(courseId, ['block-a'], lecturerId),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Nhóm 3: Validation — duplicate IDs (fail-fast TRƯỚC checkCourseOwnership)
   // ---------------------------------------------------------------------------
   describe('validation: duplicate block IDs', () => {
     it('should throw BadRequestException when blockIds has duplicates', async () => {
@@ -679,20 +712,20 @@ describe('CourseBlockService - reorder', () => {
         new BadRequestException('Duplicate block IDs are not allowed'),
       );
 
-      // Fail-fast: không được gọi Prisma
+      // Fail-fast: không được gọi Prisma gì cả (kể cả course.findUnique)
+      expect(mockPrisma.course.findUnique).not.toHaveBeenCalled();
       expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
   });
 
   // ---------------------------------------------------------------------------
-  // Nhóm 3: Validation — block không tồn tại / không thuộc course
+  // Nhóm 4: Validation — block không tồn tại / không thuộc course
   // ---------------------------------------------------------------------------
   describe('validation: blocks not in course', () => {
     it('should throw BadRequestException when some blockIds do not exist in the course', async () => {
       const blockIds = ['block-a', 'block-b', 'block-c'];
 
-      // findMany 1 chỉ trả về 2 block (thiếu 1) -> blocks.length !== blockIds.length
       mockPrisma.courseBlock.findMany.mockResolvedValueOnce(
         buildRequestedBlocks(['block-a', 'block-b']),
       );
@@ -701,20 +734,18 @@ describe('CourseBlockService - reorder', () => {
         new BadRequestException('Some blocks do not belong to this course'),
       );
 
-      // Chỉ gọi findMany 1 lần, không tới siblings hay transaction
       expect(mockPrisma.courseBlock.findMany).toHaveBeenCalledTimes(1);
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
   });
 
   // ---------------------------------------------------------------------------
-  // Nhóm 4: Validation — khác parentModuleId
+  // Nhóm 5: Validation — khác parentModuleId
   // ---------------------------------------------------------------------------
   describe('validation: different parentModuleId', () => {
     it('should throw BadRequestException when blocks belong to different parents', async () => {
       const blockIds = ['block-a', 'block-b', 'block-c'];
 
-      // block-a, block-b cùng parent 'module-1'; block-c parent null
       mockPrisma.courseBlock.findMany.mockResolvedValueOnce([
         { id: 'block-a', parentModuleId: 'module-1', position: 0 },
         { id: 'block-b', parentModuleId: 'module-1', position: 1 },
@@ -731,16 +762,14 @@ describe('CourseBlockService - reorder', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Nhóm 5: Validation — thiếu siblings
+  // Nhóm 6: Validation — thiếu siblings
   // ---------------------------------------------------------------------------
   describe('validation: missing siblings', () => {
     it('should throw BadRequestException when blockIds does not include all siblings', async () => {
       const blockIds = ['block-a', 'block-b'];
 
-      // requested blocks: a, b (cùng parent null)
       mockPrisma.courseBlock.findMany
         .mockResolvedValueOnce(buildRequestedBlocks(blockIds))
-        // siblings thực tế có 3 block -> thiếu block-c
         .mockResolvedValueOnce(buildSiblings(['block-a', 'block-b', 'block-c']));
 
       await expect(service.reorder(courseId, blockIds, lecturerId)).rejects.toThrow(
@@ -752,18 +781,14 @@ describe('CourseBlockService - reorder', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Nhóm 6: Validation — blockIds không khớp siblingIds (cùng length nhưng khác id)
+  // Nhóm 7: Validation — blockIds không khớp siblingIds
   // ---------------------------------------------------------------------------
   describe('validation: blockIds mismatch sibling IDs', () => {
     it('should throw BadRequestException when blockIds length matches siblings but IDs differ', async () => {
-      // Trường hợp này khó xảy ra thực tế vì findMany 1 đã lọc theo blockIds,
-      // nhưng vẫn test để cover nhánh every() fail.
       const blockIds = ['block-a', 'block-b'];
 
-      // requested: a, b
       mockPrisma.courseBlock.findMany
         .mockResolvedValueOnce(buildRequestedBlocks(blockIds))
-        // siblings trả về a, x (cùng length nhưng x không nằm trong blockIds)
         .mockResolvedValueOnce(buildSiblings(['block-a', 'block-x']));
 
       await expect(service.reorder(courseId, blockIds, lecturerId)).rejects.toThrow(
@@ -775,7 +800,7 @@ describe('CourseBlockService - reorder', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Nhóm 7: Prisma call arguments
+  // Nhóm 8: Prisma call arguments
   // ---------------------------------------------------------------------------
   describe('prisma call arguments', () => {
     it('should call findMany #1 with courseId and id: { in: blockIds }', async () => {
@@ -829,7 +854,7 @@ describe('CourseBlockService - reorder', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Nhóm 8: Hai giai đoạn update (tạm + chính thức)
+  // Nhóm 9: Hai giai đoạn update (tạm + chính thức)
   // ---------------------------------------------------------------------------
   describe('two-phase update', () => {
     it('should first move all blocks to temporary positions > maxPosition, then assign final positions', async () => {
@@ -837,26 +862,22 @@ describe('CourseBlockService - reorder', () => {
 
       mockPrisma.courseBlock.findMany
         .mockResolvedValueOnce(buildRequestedBlocks(blockIds))
-        // siblings có position 0 và 1 -> maxPosition = 1
         .mockResolvedValueOnce(buildSiblings(['block-a', 'block-b'], [0, 1]));
       mockPrisma.courseBlock.update.mockResolvedValue({});
 
       await service.reorder(courseId, blockIds, lecturerId);
 
-      // Tổng cộng 4 lần update: 2 tạm + 2 chính thức
       expect(mockPrisma.courseBlock.update).toHaveBeenCalledTimes(4);
 
-      // Giai đoạn 1: position tạm = maxPosition + 1 + i = 2, 3
       expect(mockPrisma.courseBlock.update).toHaveBeenNthCalledWith(1, {
         where: { id: 'block-a' },
-        data: { position: 2 }, // 1 + 1 + 0
+        data: { position: 2 },
       });
       expect(mockPrisma.courseBlock.update).toHaveBeenNthCalledWith(2, {
         where: { id: 'block-b' },
-        data: { position: 3 }, // 1 + 1 + 1
+        data: { position: 3 },
       });
 
-      // Giai đoạn 2: position chính thức = 0, 1
       expect(mockPrisma.courseBlock.update).toHaveBeenNthCalledWith(3, {
         where: { id: 'block-a' },
         data: { position: 0 },
@@ -867,16 +888,13 @@ describe('CourseBlockService - reorder', () => {
       });
     });
 
-    it('should use maxPosition = -1 when siblings array is empty (defensive)', async () => {
-      // Trường hợp này không xảy ra thực tế vì siblings.length phải === blockIds.length >= 1,
-      // nhưng vẫn test Math.max(-1, ...[]) = -1 để cover boundary.
+    it('should throw BadRequestException when siblings array is empty (length mismatch)', async () => {
       const blockIds = ['block-a'];
 
       mockPrisma.courseBlock.findMany
         .mockResolvedValueOnce(buildRequestedBlocks(blockIds))
-        .mockResolvedValueOnce([]); // siblings rỗng (giả lập)
-      // siblings.length (0) !== blockIds.length (1) -> sẽ throw trước khi tới maxPosition
-      // => test này thực chất kiểm tra nhánh throw, không phải maxPosition = -1.
+        .mockResolvedValueOnce([]);
+
       await expect(service.reorder(courseId, blockIds, lecturerId)).rejects.toThrow(
         BadRequestException,
       );

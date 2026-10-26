@@ -1,6 +1,5 @@
 import { IsEnum, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Min } from 'class-validator';
-import { BlockType } from '../../generated/prisma/client.js';
-import { Prisma } from '../../generated/prisma/client.js';
+import { BlockType, Prisma } from '../../generated/prisma/client.js';
 
 export class CreateCourseBlockDto {
   @IsEnum(BlockType)

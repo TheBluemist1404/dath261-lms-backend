@@ -1,3 +1,4 @@
+import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -11,9 +12,7 @@ async function bootstrap() {
 
   app.enableShutdownHooks();
 
-  app.setGlobalPrefix('api', {
-    exclude: [{ path: 'health', method: RequestMethod.GET }],
-  });
+  configureApp(app);
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -22,8 +21,6 @@ async function bootstrap() {
       transform: true, //chuyển dữ liêu đầu vào phù hợp khi tạo DTO
     }),
   );
-
-  app.use(cookieParser());
 
   const corsOrigin = configService.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
 
