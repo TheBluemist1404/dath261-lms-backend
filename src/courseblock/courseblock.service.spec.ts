@@ -1,15 +1,12 @@
 // courseblock.service.spec.ts
+
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
 import { vi } from 'vitest';
+import { BlockType } from '../generated/prisma/enums.js';
 import { PrismaService } from '../infrastructure/database/prisma/prisma.service.js';
 import { CourseBlockService } from './courseblock.service.js';
 import type { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
-import { BlockType } from '../generated/prisma/enums.js';
 import type { UpdateCourseBlockDto } from './dto/update-course-block.dto.js';
 
 describe('CourseBlockService - create (ownership pass)', () => {
@@ -107,15 +104,15 @@ describe('CourseBlockService - create (ownership pass)', () => {
       _max: { position: 4 },
     });
     mockPrisma.courseBlock.create.mockResolvedValue({ id: 'block-x' });
-  
+
     const dto = {
       title: 'Chapter 3',
       type: 'TEXT',
       content: 'Hi',
     } as CreateCourseBlockDto;
-  
+
     await service.create(courseId, lecturerId, dto);
-  
+
     expect(mockPrisma.courseBlock.aggregate).toHaveBeenCalledWith({
       where: { courseId, parentModuleId: null },
       _max: { position: true },
@@ -126,7 +123,7 @@ describe('CourseBlockService - create (ownership pass)', () => {
         type: dto.type,
         title: dto.title,
         content: dto.content,
-        position: 5,          // max 4 + 1
+        position: 5, // max 4 + 1
         parentModuleId: null,
       },
     });
@@ -154,10 +151,7 @@ describe('CourseBlockService - update', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        CourseBlockService,
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
+      providers: [CourseBlockService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
 
     service = module.get<CourseBlockService>(CourseBlockService);
@@ -173,7 +167,7 @@ describe('CourseBlockService - update', () => {
   type UpdateDtoInput = Omit<UpdateCourseBlockDto, 'content'> & {
     content?: unknown;
   };
-  
+
   // Helper tạo DTO update, có thể override từng field
   const buildDto = (overrides: Partial<UpdateDtoInput> = {}): UpdateCourseBlockDto =>
     ({ ...overrides }) as UpdateCourseBlockDto;
@@ -419,7 +413,7 @@ describe('CourseBlockService - update', () => {
       expect(callArg.data).not.toHaveProperty('content');
       expect(callArg.data).toEqual({ title: 'New title' });
     });
-  }); 
+  });
   // ---------------------------------------------------------------------------
   // Nhóm 6: Truyền đúng tham số cho findFirst (id + courseId)
   // ---------------------------------------------------------------------------
@@ -468,10 +462,7 @@ describe('CourseBlockService - remove', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        CourseBlockService,
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
+      providers: [CourseBlockService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
 
     service = module.get<CourseBlockService>(CourseBlockService);
@@ -507,9 +498,7 @@ describe('CourseBlockService - remove', () => {
   it('should throw NotFoundException when course does not exist', async () => {
     mockPrisma.course.findUnique.mockResolvedValue(null);
 
-    await expect(service.remove(courseId, blockId, lecturerId)).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(service.remove(courseId, blockId, lecturerId)).rejects.toThrow(NotFoundException);
     expect(mockPrisma.courseBlock.findFirst).not.toHaveBeenCalled();
     expect(mockPrisma.courseBlock.delete).not.toHaveBeenCalled();
   });
@@ -520,9 +509,7 @@ describe('CourseBlockService - remove', () => {
       lecturerId: 'other-lecturer',
     });
 
-    await expect(service.remove(courseId, blockId, lecturerId)).rejects.toThrow(
-      ForbiddenException,
-    );
+    await expect(service.remove(courseId, blockId, lecturerId)).rejects.toThrow(ForbiddenException);
     expect(mockPrisma.courseBlock.delete).not.toHaveBeenCalled();
   });
 
@@ -559,10 +546,7 @@ describe('CourseBlockService - reorder', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        CourseBlockService,
-        { provide: PrismaService, useValue: mockPrisma },
-      ],
+      providers: [CourseBlockService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
 
     service = module.get<CourseBlockService>(CourseBlockService);
@@ -581,10 +565,7 @@ describe('CourseBlockService - reorder', () => {
   });
 
   // Helper tạo block từ findMany (lần 1: blocks được yêu cầu)
-  const buildRequestedBlocks = (
-    ids: string[],
-    parentModuleId: string | null = null,
-  ) =>
+  const buildRequestedBlocks = (ids: string[], parentModuleId: string | null = null) =>
     ids.map((id, i) => ({
       id,
       parentModuleId,
@@ -592,10 +573,7 @@ describe('CourseBlockService - reorder', () => {
     }));
 
   // Helper tạo sibling từ findMany (lần 2: tất cả siblings cùng parent)
-  const buildSiblings = (
-    ids: string[],
-    positions: number[] = ids.map((_, i) => i),
-  ) =>
+  const buildSiblings = (ids: string[], positions: number[] = ids.map((_, i) => i)) =>
     ids.map((id, i) => ({
       id,
       position: positions[i],
@@ -653,15 +631,9 @@ describe('CourseBlockService - reorder', () => {
       const result = await service.reorder(courseId, blockIds, lecturerId);
 
       const finalCalls = mockPrisma.courseBlock.update.mock.calls.slice(3);
-      expect(finalCalls[0]).toEqual([
-        { where: { id: 'block-c' }, data: { position: 0 } },
-      ]);
-      expect(finalCalls[1]).toEqual([
-        { where: { id: 'block-a' }, data: { position: 1 } },
-      ]);
-      expect(finalCalls[2]).toEqual([
-        { where: { id: 'block-b' }, data: { position: 2 } },
-      ]);
+      expect(finalCalls[0]).toEqual([{ where: { id: 'block-c' }, data: { position: 0 } }]);
+      expect(finalCalls[1]).toEqual([{ where: { id: 'block-a' }, data: { position: 1 } }]);
+      expect(finalCalls[2]).toEqual([{ where: { id: 'block-b' }, data: { position: 2 } }]);
 
       expect(result).toEqual([
         { id: 'block-c', position: 0 },
@@ -678,9 +650,9 @@ describe('CourseBlockService - reorder', () => {
     it('should throw NotFoundException when course does not exist', async () => {
       mockPrisma.course.findUnique.mockResolvedValueOnce(null);
 
-      await expect(
-        service.reorder(courseId, ['block-a'], lecturerId),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.reorder(courseId, ['block-a'], lecturerId)).rejects.toThrow(
+        NotFoundException,
+      );
 
       expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
@@ -692,9 +664,9 @@ describe('CourseBlockService - reorder', () => {
         lecturerId: 'other-lecturer',
       });
 
-      await expect(
-        service.reorder(courseId, ['block-a'], lecturerId),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(service.reorder(courseId, ['block-a'], lecturerId)).rejects.toThrow(
+        ForbiddenException,
+      );
 
       expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
