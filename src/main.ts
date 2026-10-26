@@ -24,6 +24,7 @@ async function bootstrap() {
   );
 
   app.use(cookieParser());
+  configureApp(app);
 
   const corsOrigin = configService.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
 
