@@ -20,7 +20,7 @@ describe('EnrollmentController', () => {
 
   const request = {
     user: {
-      id: USER_ID,
+      userId: USER_ID,
       role: UserRole.STUDENT,
     },
   };

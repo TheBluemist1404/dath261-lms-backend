@@ -26,10 +26,10 @@ import {
 import type { Request } from 'express';
 
 import { UserRole } from '../../generated/prisma/client.js';
+import { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { Roles } from '../authorization/roles.decorator.js';
 import { RolesGuard } from '../authorization/roles.guard.js';
 import { CourseIdParamDto } from './dto/course-id-param.dto.js';
-
 import { EnrollmentActionResponseDto } from './dto/enrollment-action-response.dto.js';
 import { EnrollmentStateResponseDto } from './dto/enrollment-state-response.dto.js';
 import { MyCourseEnrollmentResponseDto } from './dto/my-course-enrollment-response.dto.js';
@@ -38,10 +38,7 @@ import { PaginatedMyCoursesResponseDto } from './dto/paginated-my-courses-respon
 import { EnrollmentService } from './enrollment.service.js';
 
 type AuthenticatedRequest = Request & {
-  user: {
-    id: string;
-    role: UserRole;
-  };
+  user: AuthenticatedUser;
 };
 
 @ApiTags('Enrollments')
@@ -69,10 +66,10 @@ export class EnrollmentController {
   })
   @ApiNotFoundResponse({ description: 'Course not found.' })
   async enroll(
-    @Param('courseId') params: CourseIdParamDto,
+    @Param() params: CourseIdParamDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<EnrollmentActionResponseDto> {
-    const enrollment = await this.enrollmentService.enroll(req.user.id, params.courseId);
+    const enrollment = await this.enrollmentService.enroll(req.user.userId, params.courseId);
 
     return {
       enrollmentId: enrollment.id,
@@ -98,10 +95,10 @@ export class EnrollmentController {
     description: 'Enrollment is already LEFT or COMPLETED.',
   })
   async leave(
-    @Param('courseId') params: CourseIdParamDto,
+    @Param() params: CourseIdParamDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<EnrollmentActionResponseDto> {
-    const enrollment = await this.enrollmentService.leave(req.user.id, params.courseId);
+    const enrollment = await this.enrollmentService.leave(req.user.userId, params.courseId);
 
     return {
       enrollmentId: enrollment.id,
@@ -124,7 +121,7 @@ export class EnrollmentController {
     @Req() req: AuthenticatedRequest,
     @Query() query: MyEnrollmentsQueryDto,
   ): Promise<PaginatedMyCoursesResponseDto> {
-    return this.enrollmentService.getMyEnrollments(req.user.id, query);
+    return this.enrollmentService.getMyEnrollments(req.user.userId, query);
   }
   @Get('courses/:courseId/enrollments/me')
   @Roles(UserRole.STUDENT)
@@ -135,9 +132,9 @@ export class EnrollmentController {
   @ApiOkResponse({ type: EnrollmentStateResponseDto })
   @ApiNotFoundResponse({ description: 'Course not found.' })
   async getCourseEnrollmentState(
-    @Param('courseId') params: CourseIdParamDto,
+    @Param() params: CourseIdParamDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<EnrollmentStateResponseDto> {
-    return this.enrollmentService.getCourseEnrollmentState(req.user.id, params.courseId);
+    return this.enrollmentService.getCourseEnrollmentState(req.user.userId, params.courseId);
   }
 }
