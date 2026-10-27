@@ -7,7 +7,7 @@ import {
 
 import { Course, CourseStatus, EnrollmentStatus } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
-
+import { MyEnrollmentsQueryDto } from './dto/my-enrollments-query.dto.js';
 @Injectable()
 export class EnrollmentService {
   constructor(private readonly prisma: PrismaService) {}
@@ -167,30 +167,44 @@ export class EnrollmentService {
    * Course availability is evaluated using its current state,
    * not its state at the time of enrollment.
    */
-  async getMyEnrollments(userId: string) {
-    const enrollments = await this.prisma.enrollment.findMany({
-      where: { userId },
-      orderBy: { enrolledAt: 'desc' },
-      select: {
-        id: true,
-        courseId: true,
-        status: true,
-        enrolledAt: true,
-        leftAt: true,
-        completedAt: true,
-        course: {
-          select: {
-            id: true,
-            title: true,
-            status: true,
-            isSuspended: true,
+  async getMyEnrollments(userId: string, query: MyEnrollmentsQueryDto) {
+    const { page, limit } = query;
+    const skip = (page - 1) * limit;
+
+    const where = { userId };
+
+    const [total, enrollments] = await Promise.all([
+      this.prisma.enrollment.count({
+        where,
+      }),
+
+      this.prisma.enrollment.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [{ enrolledAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+          courseId: true,
+          status: true,
+          enrolledAt: true,
+          leftAt: true,
+          completedAt: true,
+          course: {
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              isSuspended: true,
+            },
           },
         },
-      },
-    });
+      }),
+    ]);
 
-    return enrollments.map((enrollment) => {
-      const courseAvailable = this.isCourseAvailable(enrollment.course);
+    const data = enrollments.map((enrollment) => {
+      const courseAvailable =
+        enrollment.course.status === CourseStatus.PUBLISHED && !enrollment.course.isSuspended;
 
       return {
         enrollmentId: enrollment.id,
@@ -204,6 +218,20 @@ export class EnrollmentService {
         canAccessCourse: courseAvailable && enrollment.status !== EnrollmentStatus.LEFT,
       };
     });
+
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
+    };
   }
 
   /**

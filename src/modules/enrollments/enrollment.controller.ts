@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -32,6 +33,8 @@ import { CourseIdParamDto } from './dto/course-id-param.dto.js';
 import { EnrollmentActionResponseDto } from './dto/enrollment-action-response.dto.js';
 import { EnrollmentStateResponseDto } from './dto/enrollment-state-response.dto.js';
 import { MyCourseEnrollmentResponseDto } from './dto/my-course-enrollment-response.dto.js';
+import { MyEnrollmentsQueryDto } from './dto/my-enrollments-query.dto.js';
+import { PaginatedMyCoursesResponseDto } from './dto/paginated-my-courses-response.dto.js';
 import { EnrollmentService } from './enrollment.service.js';
 
 type AuthenticatedRequest = Request & {
@@ -114,15 +117,15 @@ export class EnrollmentController {
     summary: 'Get my courses and enrollment history',
   })
   @ApiOkResponse({
-    type: MyCourseEnrollmentResponseDto,
-    isArray: true,
+    description: 'Paginated list of the current student enrollments.',
+    type: PaginatedMyCoursesResponseDto,
   })
   async getMyEnrollments(
     @Req() req: AuthenticatedRequest,
-  ): Promise<MyCourseEnrollmentResponseDto[]> {
-    return this.enrollmentService.getMyEnrollments(req.user.id);
+    @Query() query: MyEnrollmentsQueryDto,
+  ): Promise<PaginatedMyCoursesResponseDto> {
+    return this.enrollmentService.getMyEnrollments(req.user.id, query);
   }
-
   @Get('courses/:courseId/enrollments/me')
   @Roles(UserRole.STUDENT)
   @ApiOperation({
