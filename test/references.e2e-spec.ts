@@ -232,6 +232,68 @@ describe('Course references API (e2e)', () => {
   });
 
   describe('GET /pages/:id/references', () => {
+    it('makes a reference unavailable after its target becomes a TEXT block', async () => {
+      const reference = await addReference(video.id, 30);
+
+      await http()
+        .patch(`/api/courseblock/update/${course.id}/${video.id}`)
+        .set(lecturer.auth)
+        .send({ type: 'TEXT' })
+        .expect(200);
+
+      expect((await referencesSeenBy(author))[0]).toEqual({
+        id: reference.id,
+        pageId,
+        createdAt: expect.any(String),
+        status: 'UNAVAILABLE',
+      });
+      expect((await referencesSeenBy(peer))[0].status).toBe('LOCKED');
+      expect(await testApp.prisma.resourceReference.count()).toBe(1);
+    });
+
+    it('makes a video timestamp unavailable after its target becomes a FILE block', async () => {
+      await addReference(video.id, 30);
+
+      await http()
+        .patch(`/api/courseblock/update/${course.id}/${video.id}`)
+        .set(lecturer.auth)
+        .send({ type: 'FILE' })
+        .expect(200);
+
+      const [reference] = await referencesSeenBy(author);
+      expect(reference.status).toBe('UNAVAILABLE');
+      expect(reference).not.toHaveProperty('block');
+      expect(reference).not.toHaveProperty('timestampSeconds');
+    });
+
+    it('revalidates a timestamp after video duration changes and restores resolution when valid', async () => {
+      await addReference(video.id, 300);
+
+      await http()
+        .patch(`/api/courseblock/update/${course.id}/${video.id}`)
+        .set(lecturer.auth)
+        .send({ content: { durationSeconds: 120 } })
+        .expect(200);
+
+      expect((await referencesSeenBy(author))[0]).toEqual({
+        id: expect.any(String),
+        pageId,
+        createdAt: expect.any(String),
+        status: 'UNAVAILABLE',
+      });
+
+      await http()
+        .patch(`/api/courseblock/update/${course.id}/${video.id}`)
+        .set(lecturer.auth)
+        .send({ content: { durationSeconds: 300 } })
+        .expect(200);
+
+      expect((await referencesSeenBy(author))[0]).toMatchObject({
+        status: 'AVAILABLE',
+        timestampSeconds: 300,
+      });
+    });
+
     it('resolves each reference against the viewer’s own access', async () => {
       await addReference(video.id, 30);
 

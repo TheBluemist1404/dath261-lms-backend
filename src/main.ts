@@ -1,4 +1,3 @@
-import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -13,14 +12,6 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   configureApp(app);
-
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true, //Bỏ các field ko được khai báo trong DTO
-      forbidNonWhitelisted: true,
-      transform: true, //chuyển dữ liêu đầu vào phù hợp khi tạo DTO
-    }),
-  );
 
   const corsOrigin = configService.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
 
