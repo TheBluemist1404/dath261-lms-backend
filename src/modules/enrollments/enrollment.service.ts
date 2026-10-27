@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
-import { Course, CourseStatus, EnrollmentStatus } from '../../generated/prisma/client.js';
+import { CourseStatus, EnrollmentStatus } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { MyEnrollmentsQueryDto } from './dto/my-enrollments-query.dto.js';
 @Injectable()

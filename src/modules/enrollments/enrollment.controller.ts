@@ -32,7 +32,6 @@ import { RolesGuard } from '../authorization/roles.guard.js';
 import { CourseIdParamDto } from './dto/course-id-param.dto.js';
 import { EnrollmentActionResponseDto } from './dto/enrollment-action-response.dto.js';
 import { EnrollmentStateResponseDto } from './dto/enrollment-state-response.dto.js';
-import { MyCourseEnrollmentResponseDto } from './dto/my-course-enrollment-response.dto.js';
 import { MyEnrollmentsQueryDto } from './dto/my-enrollments-query.dto.js';
 import { PaginatedMyCoursesResponseDto } from './dto/paginated-my-courses-response.dto.js';
 import { EnrollmentService } from './enrollment.service.js';

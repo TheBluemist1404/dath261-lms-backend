@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EnrollmentStatus, UserRole } from '../../../generated/prisma/client.js';
-import { CourseIdParamDto } from '../dto/course-id-param.dto.js';
 import { EnrollmentController } from './../enrollment.controller.js';
 import { EnrollmentService } from './../enrollment.service.js';
 

@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-
+import { resolve } from 'node:path';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-
 import * as bcrypt from 'bcrypt';
+import dotenv from 'dotenv';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -15,6 +15,8 @@ import {
   UserRole,
 } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../infrastructure/database/prisma/prisma.service.js';
+
+dotenv.config({ path: resolve(process.cwd(), '.env.test') });
 
 describe('Enrollment HTTP integration', () => {
   let app: INestApplication | undefined;
@@ -34,6 +36,20 @@ describe('Enrollment HTTP integration', () => {
   let lifecycleCourseId: string;
 
   const api = '/api';
+
+  function getApp(): INestApplication {
+    if (!app) {
+      throw new Error('Nest application is not initialized.');
+    }
+    return app;
+  }
+
+  function getPrisma(): PrismaService {
+    if (!prisma) {
+      throw new Error('PrismaService is not initialized.');
+    }
+    return prisma;
+  }
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -64,7 +80,7 @@ describe('Enrollment HTTP integration', () => {
     ): Promise<{ id: string; email: string }> {
       const email = `${label}-${suffix}@example.test`;
 
-      const user = await prisma!.user.create({
+      const user = await getPrisma().user.create({
         data: {
           email,
           passwordHash,
@@ -92,7 +108,7 @@ describe('Enrollment HTTP integration', () => {
     async function createPublishedCourse(title: string): Promise<string> {
       const now = Date.now();
 
-      const course = await prisma!.course.create({
+      const course = await getPrisma().course.create({
         data: {
           title,
           description: 'Enrollment HTTP integration test',
@@ -161,7 +177,7 @@ describe('Enrollment HTTP integration', () => {
   });
 
   async function login(email: string): Promise<string> {
-    const response = await request(app!.getHttpServer()).post(`${api}/auth/login`).send({
+    const response = await request(getApp().getHttpServer()).post(`${api}/auth/login`).send({
       email,
       password,
     });
@@ -187,11 +203,11 @@ describe('Enrollment HTTP integration', () => {
   // Authentication and role enforcement
 
   it('rejects requests without an access token', async () => {
-    await request(app!.getHttpServer()).get(`${api}/users/me/enrollments`).expect(401);
+    await request(getApp().getHttpServer()).get(`${api}/users/me/enrollments`).expect(401);
   });
 
   it('rejects an invalid access token', async () => {
-    await request(app!.getHttpServer())
+    await request(getApp().getHttpServer())
       .get(`${api}/users/me/enrollments`)
       .set('Authorization', 'Bearer invalid-token')
       .expect(401);
@@ -200,7 +216,7 @@ describe('Enrollment HTTP integration', () => {
   it('rejects a Lecturer on the Student-only My Courses endpoint', async () => {
     const token = await login(lecturer.email);
 
-    await request(app!.getHttpServer())
+    await request(getApp().getHttpServer())
       .get(`${api}/users/me/enrollments`)
       .set('Authorization', `Bearer ${token}`)
       .expect(403);
@@ -213,7 +229,7 @@ describe('Enrollment HTTP integration', () => {
     const tokenB = await login(studentB.email);
 
     // Student A enrolls in a course.
-    const enrollResponse = await request(app!.getHttpServer())
+    const enrollResponse = await request(getApp().getHttpServer())
       .post(enrollUrl(isolationCourseId))
       .set('Authorization', `Bearer ${tokenA}`)
       .expect(201);
@@ -225,7 +241,7 @@ describe('Enrollment HTTP integration', () => {
     });
 
     // Student A can read their own enrollment state.
-    const stateA = await request(app!.getHttpServer())
+    const stateA = await request(getApp().getHttpServer())
       .get(stateUrl(isolationCourseId))
       .set('Authorization', `Bearer ${tokenA}`)
       .expect(200);
@@ -239,7 +255,7 @@ describe('Enrollment HTTP integration', () => {
     });
 
     // Student B must not see Student A's enrollment.
-    const stateB = await request(app!.getHttpServer())
+    const stateB = await request(getApp().getHttpServer())
       .get(stateUrl(isolationCourseId))
       .set('Authorization', `Bearer ${tokenB}`)
       .expect(200);
@@ -253,7 +269,7 @@ describe('Enrollment HTTP integration', () => {
     });
 
     // Student B's My Courses list must not contain Student A's course.
-    const myCoursesB = await request(app!.getHttpServer())
+    const myCoursesB = await request(getApp().getHttpServer())
       .get(`${api}/users/me/enrollments?page=1&limit=10`)
       .set('Authorization', `Bearer ${tokenB}`)
       .expect(200);
@@ -262,7 +278,7 @@ describe('Enrollment HTTP integration', () => {
     expect(myCoursesB.body.meta.total).toBe(0);
 
     // Student A sees the enrollment in their own list.
-    const myCoursesA = await request(app!.getHttpServer())
+    const myCoursesA = await request(getApp().getHttpServer())
       .get(`${api}/users/me/enrollments?page=1&limit=10`)
       .set('Authorization', `Bearer ${tokenA}`)
       .expect(200);
@@ -280,7 +296,7 @@ describe('Enrollment HTTP integration', () => {
     const token = await login(studentA.email);
 
     // Enroll in the course.
-    const enrollResponse = await request(app!.getHttpServer())
+    const enrollResponse = await request(getApp().getHttpServer())
       .post(enrollUrl(lifecycleCourseId))
       .set('Authorization', `Bearer ${token}`)
       .expect(201);
@@ -293,7 +309,7 @@ describe('Enrollment HTTP integration', () => {
 
     const enrollmentId = enrollResponse.body.enrollmentId as string;
 
-    const originalEnrollment = await prisma!.enrollment.findUniqueOrThrow({
+    const originalEnrollment = await getPrisma().enrollment.findUniqueOrThrow({
       where: {
         userId_courseId: {
           userId: studentA.id,
@@ -309,7 +325,7 @@ describe('Enrollment HTTP integration', () => {
     const originalEnrolledAt = originalEnrollment.enrolledAt;
 
     // Read state while enrolled.
-    const activeState = await request(app!.getHttpServer())
+    const activeState = await request(getApp().getHttpServer())
       .get(stateUrl(lifecycleCourseId))
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
@@ -322,7 +338,7 @@ describe('Enrollment HTTP integration', () => {
     });
 
     // Leave the course.
-    const leaveResponse = await request(app!.getHttpServer())
+    const leaveResponse = await request(getApp().getHttpServer())
       .delete(leaveUrl(lifecycleCourseId))
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
@@ -335,7 +351,7 @@ describe('Enrollment HTTP integration', () => {
     });
 
     // Verify that the enrollment was updated, not deleted.
-    const leftEnrollment = await prisma!.enrollment.findUniqueOrThrow({
+    const leftEnrollment = await getPrisma().enrollment.findUniqueOrThrow({
       where: {
         userId_courseId: {
           userId: studentA.id,
@@ -350,7 +366,7 @@ describe('Enrollment HTTP integration', () => {
     expect(leftEnrollment.enrolledAt.getTime()).toBe(originalEnrolledAt.getTime());
 
     // Read state after leaving.
-    const leftState = await request(app!.getHttpServer())
+    const leftState = await request(getApp().getHttpServer())
       .get(stateUrl(lifecycleCourseId))
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
@@ -363,7 +379,7 @@ describe('Enrollment HTTP integration', () => {
     });
 
     // My Courses must retain the LEFT enrollment.
-    const myCoursesAfterLeave = await request(app!.getHttpServer())
+    const myCoursesAfterLeave = await request(getApp().getHttpServer())
       .get(`${api}/users/me/enrollments?page=1&limit=100`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
@@ -377,7 +393,7 @@ describe('Enrollment HTTP integration', () => {
     expect(leftItem.canAccessCourse).toBe(false);
 
     // Re-enroll using the same Student/Course pair.
-    const reEnrollResponse = await request(app!.getHttpServer())
+    const reEnrollResponse = await request(getApp().getHttpServer())
       .post(enrollUrl(lifecycleCourseId))
       .set('Authorization', `Bearer ${token}`)
       .expect(201);
@@ -390,7 +406,7 @@ describe('Enrollment HTTP integration', () => {
     });
 
     // Confirm that the retained enrollment was reactivated.
-    const reactivatedEnrollment = await prisma!.enrollment.findUniqueOrThrow({
+    const reactivatedEnrollment = await getPrisma().enrollment.findUniqueOrThrow({
       where: {
         userId_courseId: {
           userId: studentA.id,
@@ -405,7 +421,7 @@ describe('Enrollment HTTP integration', () => {
     expect(reactivatedEnrollment.enrolledAt.getTime()).toBe(originalEnrolledAt.getTime());
 
     // Confirm that the HTTP state reflects reactivation.
-    const reactivatedState = await request(app!.getHttpServer())
+    const reactivatedState = await request(getApp().getHttpServer())
       .get(stateUrl(lifecycleCourseId))
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
@@ -423,12 +439,12 @@ describe('Enrollment HTTP integration', () => {
   it('returns 409 when a Student enrolls twice while already ACTIVE', async () => {
     const token = await login(studentA.email);
 
-    await request(app!.getHttpServer())
+    await request(getApp().getHttpServer())
       .post(enrollUrl(isolationCourseId))
       .set('Authorization', `Bearer ${token}`)
       .expect(409);
 
-    const records = await prisma!.enrollment.findMany({
+    const records = await getPrisma().enrollment.findMany({
       where: {
         userId: studentA.id,
         courseId: isolationCourseId,
