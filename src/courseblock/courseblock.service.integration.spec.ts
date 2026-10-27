@@ -102,7 +102,7 @@ describe('CourseBlockService - integration', () => {
     title?: string;
     position: number;
     parentModuleId?: string | null;
-    content?: Prisma.InputJsonValue;
+    content?: Prisma.InputJsonObject;
   }) {
     return prisma.courseBlock.create({
       data: {
@@ -261,7 +261,7 @@ describe('CourseBlockService - integration', () => {
   // ---------------------------------------------------------------------------
   describe('update', () => {
     it('should partially update fields and persist changes', async () => {
-      const block = await createBlock({ position: 0, title: 'Old', content: 'Old' });
+      const block = await createBlock({ position: 0, title: 'Old', content: { text: 'Old' } });
 
       const updated = await service.update(courseA.id, block.id, lecturerA.id, {
         title: 'New',

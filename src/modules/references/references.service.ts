@@ -143,6 +143,19 @@ export class ReferencesService {
       // No block metadata for references the viewer cannot open (NFR-VAL-02).
       return { ...base, status };
     }
+
+    // A course edit can change the target type or shorten a referenced video.
+    const block = reference.courseBlock;
+    const timestamp = reference.timestampSeconds;
+    const duration = durationSeconds(block);
+    if (
+      !isReferenceable(block.type) ||
+      (timestamp !== null &&
+        (block.type !== BlockType.VIDEO || (duration !== null && timestamp > duration)))
+    ) {
+      return { ...base, status: 'UNAVAILABLE' };
+    }
+
     return {
       ...base,
       status,

@@ -78,7 +78,7 @@ describe('CourseBlockService - create (ownership pass)', () => {
     const dto = {
       title: 'Chapter 2',
       type: 'TEXT',
-      content: 'Hello',
+      content: { text: 'Hello' },
       // parentModuleId
       // biome-ignore lint/suspicious/noExplicitAny: NestJS request object, can't type it properly
     } as any;
@@ -108,7 +108,7 @@ describe('CourseBlockService - create (ownership pass)', () => {
     const dto = {
       title: 'Chapter 3',
       type: 'TEXT',
-      content: 'Hi',
+      content: { text: 'Hi' },
     } as CreateCourseBlockDto;
 
     await service.create(courseId, lecturerId, dto);
@@ -178,7 +178,7 @@ describe('CourseBlockService - update', () => {
     courseId,
     type: BlockType.TEXT,
     title: 'Old title',
-    content: 'Old content',
+    content: { text: 'Old content' },
     parentModuleId: null,
     ...overrides,
   });
