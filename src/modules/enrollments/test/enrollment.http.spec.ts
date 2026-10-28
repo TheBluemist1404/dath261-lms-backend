@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
-import dotenv from 'dotenv';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -15,8 +14,6 @@ import {
   UserRole,
 } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../../infrastructure/database/prisma/prisma.service.js';
-
-dotenv.config({ path: resolve(process.cwd(), '.env.test') });
 
 describe('Enrollment HTTP integration', () => {
   let app: INestApplication | undefined;
