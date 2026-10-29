@@ -1,6 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
+
+import { MyEnrollmentState } from '../enums/my-enrollment-state.enum.js';
 
 export class MyEnrollmentsQueryDto {
   @ApiPropertyOptional({
@@ -28,4 +30,13 @@ export class MyEnrollmentsQueryDto {
   @Min(1)
   @Max(100)
   limit = 10;
+
+  @ApiPropertyOptional({
+    enum: MyEnrollmentState,
+    description: 'Filter My Courses by the derived course state',
+    example: MyEnrollmentState.IN_PROGRESS,
+  })
+  @IsOptional()
+  @IsEnum(MyEnrollmentState)
+  state?: MyEnrollmentState;
 }

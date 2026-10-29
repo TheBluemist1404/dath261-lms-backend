@@ -283,15 +283,15 @@ describe('EnrollmentService', () => {
         course: makeCourse(),
       };
 
-      const left = {
-        ...makeEnrollment(EnrollmentStatus.LEFT),
+      const suspended = {
+        ...makeEnrollment(EnrollmentStatus.ACTIVE),
         id: 'enrollment-2',
         courseId: 'course-2',
-        course: makeCourse({ id: 'course-2' }),
+        course: makeCourse({ id: 'course-2', isSuspended: true }),
       };
 
       prismaMock.enrollment.count.mockResolvedValue(5);
-      prismaMock.enrollment.findMany.mockResolvedValue([active, left]);
+      prismaMock.enrollment.findMany.mockResolvedValue([active, suspended]);
 
       const query = {
         page: 2,
@@ -301,12 +301,22 @@ describe('EnrollmentService', () => {
       const result = await service.getMyEnrollments(USER_ID, query);
 
       expect(prismaMock.enrollment.count).toHaveBeenCalledWith({
-        where: { userId: USER_ID },
+        where: {
+          userId: USER_ID,
+          status: {
+            not: EnrollmentStatus.LEFT,
+          },
+        },
       });
 
       expect(prismaMock.enrollment.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { userId: USER_ID },
+          where: {
+            userId: USER_ID,
+            status: {
+              not: EnrollmentStatus.LEFT,
+            },
+          },
           skip: 2,
           take: 2,
           orderBy: [{ enrolledAt: 'desc' }, { id: 'desc' }],

@@ -385,9 +385,7 @@ describe('Enrollment HTTP integration', () => {
       (item: { courseId: string }) => item.courseId === lifecycleCourseId,
     );
 
-    expect(leftItem).toBeDefined();
-    expect(leftItem.status).toBe(EnrollmentStatus.LEFT);
-    expect(leftItem.canAccessCourse).toBe(false);
+    expect(leftItem).toBeUndefined();
 
     // Re-enroll using the same Student/Course pair.
     const reEnrollResponse = await request(getApp().getHttpServer())

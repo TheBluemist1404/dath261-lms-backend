@@ -4,10 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-
-import { CourseStatus, EnrollmentStatus } from '../../generated/prisma/client.js';
+import { CourseStatus, EnrollmentStatus, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { MyEnrollmentsQueryDto } from './dto/my-enrollments-query.dto.js';
+import { MyEnrollmentState } from './enums/my-enrollment-state.enum.js';
 @Injectable()
 export class EnrollmentService {
   constructor(private readonly prisma: PrismaService) {}
@@ -168,15 +168,13 @@ export class EnrollmentService {
    * not its state at the time of enrollment.
    */
   async getMyEnrollments(userId: string, query: MyEnrollmentsQueryDto) {
-    const { page, limit } = query;
+    const { page, limit, state } = query;
     const skip = (page - 1) * limit;
 
-    const where = { userId };
+    const where = this.buildMyEnrollmentsWhere(userId, state);
 
     const [total, enrollments] = await Promise.all([
-      this.prisma.enrollment.count({
-        where,
-      }),
+      this.prisma.enrollment.count({ where }),
 
       this.prisma.enrollment.findMany({
         where,
@@ -203,13 +201,13 @@ export class EnrollmentService {
     ]);
 
     const data = enrollments.map((enrollment) => {
-      const courseAvailable =
-        enrollment.course.status === CourseStatus.PUBLISHED && !enrollment.course.isSuspended;
+      const courseAvailable = this.isCourseAvailable(enrollment.course);
 
       return {
         enrollmentId: enrollment.id,
         courseId: enrollment.courseId,
         status: enrollment.status,
+        state: this.deriveMyEnrollmentState(enrollment.status, courseAvailable),
         enrolledAt: enrollment.enrolledAt,
         leftAt: enrollment.leftAt,
         completedAt: enrollment.completedAt,
@@ -232,6 +230,76 @@ export class EnrollmentService {
         hasPreviousPage: page > 1,
       },
     };
+  }
+
+  private buildMyEnrollmentsWhere(
+    userId: string,
+    state?: MyEnrollmentState,
+  ): Prisma.EnrollmentWhereInput {
+    switch (state) {
+      case MyEnrollmentState.IN_PROGRESS:
+        return {
+          userId,
+          status: EnrollmentStatus.ACTIVE,
+          course: {
+            is: {
+              status: CourseStatus.PUBLISHED,
+              isSuspended: false,
+            },
+          },
+        };
+
+      case MyEnrollmentState.UNAVAILABLE:
+        return {
+          userId,
+          status: EnrollmentStatus.ACTIVE,
+          course: {
+            is: {
+              OR: [
+                {
+                  status: {
+                    not: CourseStatus.PUBLISHED,
+                  },
+                },
+                {
+                  isSuspended: true,
+                },
+              ],
+            },
+          },
+        };
+
+      case MyEnrollmentState.COMPLETED:
+        return {
+          userId,
+          status: EnrollmentStatus.COMPLETED,
+        };
+
+      default:
+        // My Courses excludes LEFT enrollments by default.
+        return {
+          userId,
+          status: {
+            not: EnrollmentStatus.LEFT,
+          },
+        };
+    }
+  }
+
+  private deriveMyEnrollmentState(
+    status: EnrollmentStatus,
+    courseAvailable: boolean,
+  ): MyEnrollmentState {
+    if (status === EnrollmentStatus.COMPLETED) {
+      return MyEnrollmentState.COMPLETED;
+    }
+
+    if (status === EnrollmentStatus.ACTIVE) {
+      return courseAvailable ? MyEnrollmentState.IN_PROGRESS : MyEnrollmentState.UNAVAILABLE;
+    }
+
+    // LEFT should have been excluded by the database query.
+    throw new Error(`Unexpected enrollment status in My Courses: ${status}`);
   }
 
   /**
