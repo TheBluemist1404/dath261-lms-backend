@@ -1,0 +1,5 @@
+export enum MyEnrollmentState {
+  IN_PROGRESS = 'IN_PROGRESS',
+  UNAVAILABLE = 'UNAVAILABLE',
+  COMPLETED = 'COMPLETED',
+}

@@ -9,6 +9,7 @@ import { AuthModule } from './modules/auth/auth.module.js';
 import { AccessTokenGuard } from './modules/auth/guards/access-token.guard.js';
 import { CollaborationModule } from './modules/collaboration/collaboration.module.js';
 import { DiscussionModule } from './modules/discussion/discussion.module.js';
+import { EnrollmentModule } from './modules/enrollments/enrollment.module.js';
 import { PagesModule } from './modules/pages/pages.module.js';
 import { ReferencesModule } from './modules/references/references.module.js';
 import { SearchModule } from './modules/search/search.module.js';
@@ -32,6 +33,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
     DiscussionModule,
     ReferencesModule,
     SearchModule,
+    EnrollmentModule,
   ],
   providers: [
     {
