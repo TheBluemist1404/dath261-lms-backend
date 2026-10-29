@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { Prisma } from '../../generated/prisma/client.js';
 import { BlockType } from '../../generated/prisma/enums.js';
 
 export class CourseBlockResponseDto {
@@ -18,11 +19,13 @@ export class CourseBlockResponseDto {
   position: number;
 
   @ApiPropertyOptional({
-    description: 'Content of the block (markdown/html)',
-    example: '# Welcome',
+    type: 'object',
+    additionalProperties: true,
+    description: 'Type-specific JSON object payload, or null when no content is stored.',
+    example: { url: 'https://example.com/video.mp4', durationSeconds: 120 },
     nullable: true,
   })
-  content: string | null;
+  content: Prisma.JsonObject | null;
 
   @ApiPropertyOptional({
     description: 'ID of the parent MODULE block, null if top-level',
