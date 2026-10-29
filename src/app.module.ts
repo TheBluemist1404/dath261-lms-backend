@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { validateEnvironment } from './config/env.validation.js';
+import { CourseModule } from './course/course.module.js';
 import { CourseBlockModule } from './courseblock/courseblock.module.js';
 import { HealthModule } from './health/health.module.js';
 import { DatabaseModule } from './infrastructure/database/database.module.js';
@@ -24,7 +25,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
     DatabaseModule,
     HealthModule,
     CourseBlockModule,
-    //CourseModule,
+    CourseModule,
     AuthModule,
     CollaborationModule,
     WorkspacesModule,
