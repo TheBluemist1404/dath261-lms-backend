@@ -161,10 +161,13 @@ export class EnrollmentController {
     description: 'Only ACTIVE enrollments can be completed.',
   })
   async completeEnrollment(
-    @Param('courseId') courseId: string,
-    @Param('enrollmentId') enrollmentId: string,
+    @Param() param: CourseEnrollmentParamsDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<EnrollmentCompletionResponseDto> {
-    return this.enrollmentService.completeEnrollment(req.user.userId, courseId, enrollmentId);
+    return this.enrollmentService.completeEnrollment(
+      req.user.userId,
+      param.courseId,
+      param.enrollmentId,
+    );
   }
 }

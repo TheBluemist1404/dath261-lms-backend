@@ -147,7 +147,10 @@ describe('EnrollmentController', () => {
 
       serviceMock.completeEnrollment.mockResolvedValue(expectedResponse);
 
-      const result = await controller.completeEnrollment(courseId, enrollmentId, request as never);
+      const result = await controller.completeEnrollment(
+        { courseId, enrollmentId },
+        request as never,
+      );
 
       expect(serviceMock.completeEnrollment).toHaveBeenCalledWith(
         lecturerId,
@@ -164,7 +167,7 @@ describe('EnrollmentController', () => {
       );
 
       await expect(
-        controller.completeEnrollment(courseId, enrollmentId, {
+        controller.completeEnrollment({ courseId, enrollmentId }, {
           user: {
             userId: lecturerId,
             role: UserRole.LECTURER,
