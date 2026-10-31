@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
 import { type INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
@@ -31,6 +30,13 @@ describe('Enrollment HTTP integration', () => {
 
   let isolationCourseId: string;
   let lifecycleCourseId: string;
+  let leftEnrollmentId: string;
+  let completedEnrollmentId: string;
+
+  let otherLecturer: { id: string; email: string };
+  let completionStudent: { id: string; email: string };
+
+  let completionEnrollmentId: string;
 
   const api = '/api';
 
@@ -125,6 +131,47 @@ describe('Enrollment HTTP integration', () => {
     isolationCourseId = await createPublishedCourse(`Isolation course ${suffix}`);
 
     lifecycleCourseId = await createPublishedCourse(`Lifecycle course ${suffix}`);
+
+    otherLecturer = await createUser(UserRole.LECTURER, 'other-lecturer');
+
+    completionStudent = await createUser(UserRole.STUDENT, 'completion-student');
+
+    // LEFT enrollment
+    const leftEnrollment = await getPrisma().enrollment.create({
+      data: {
+        userId: studentB.id,
+        courseId: lifecycleCourseId,
+        status: EnrollmentStatus.LEFT,
+        leftAt: new Date(),
+      },
+    });
+
+    leftEnrollmentId = leftEnrollment.id;
+
+    // COMPLETED enrollment
+    const completedStudent = await createUser(UserRole.STUDENT, 'completed-student');
+
+    const completedEnrollment = await getPrisma().enrollment.create({
+      data: {
+        userId: completedStudent.id,
+        courseId: lifecycleCourseId,
+        status: EnrollmentStatus.COMPLETED,
+        completedAt: new Date(),
+      },
+    });
+
+    completedEnrollmentId = completedEnrollment.id;
+
+    // ACTIVE enrollment specifically for Lecturer completion tests
+    const completionEnrollment = await getPrisma().enrollment.create({
+      data: {
+        userId: completionStudent.id,
+        courseId: lifecycleCourseId,
+        status: EnrollmentStatus.ACTIVE,
+      },
+    });
+
+    completionEnrollmentId = completionEnrollment.id;
   });
 
   afterAll(async () => {
@@ -197,6 +244,9 @@ describe('Enrollment HTTP integration', () => {
     return `${api}/courses/${courseId}/enrollments/me`;
   }
 
+  function completionUrl(courseId: string, enrollmentId: string): string {
+    return `${api}/courses/${courseId}/enrollments/${enrollmentId}/complete`;
+  }
   // Authentication and role enforcement
 
   it('rejects requests without an access token', async () => {
@@ -375,7 +425,7 @@ describe('Enrollment HTTP integration', () => {
       canAccessCourse: false,
     });
 
-    // My Courses must retain the LEFT enrollment.
+    // My Courses must exclude the LEFT enrollment.
     const myCoursesAfterLeave = await request(getApp().getHttpServer())
       .get(`${api}/users/me/enrollments?page=1&limit=100`)
       .set('Authorization', `Bearer ${token}`)
@@ -447,5 +497,121 @@ describe('Enrollment HTTP integration', () => {
     });
 
     expect(records).toHaveLength(1);
+  });
+
+  // Lecturer completes Student enrollment
+
+  it('rejects completion requests without an access token', async () => {
+    await request(getApp().getHttpServer())
+      .patch(completionUrl(lifecycleCourseId, completionEnrollmentId))
+      .expect(401);
+  });
+
+  it('rejects a Student attempting to complete an enrollment', async () => {
+    const token = await login(studentA.email);
+
+    await request(getApp().getHttpServer())
+      .patch(completionUrl(lifecycleCourseId, completionEnrollmentId))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(403);
+  });
+
+  it('rejects a Lecturer who does not own the course', async () => {
+    const token = await login(otherLecturer.email);
+
+    await request(getApp().getHttpServer())
+      .patch(completionUrl(lifecycleCourseId, completionEnrollmentId))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(403);
+
+    // Enrollment must remain ACTIVE.
+    const enrollment = await getPrisma().enrollment.findUniqueOrThrow({
+      where: {
+        id: completionEnrollmentId,
+      },
+    });
+
+    expect(enrollment.status).toBe(EnrollmentStatus.ACTIVE);
+    expect(enrollment.completedAt).toBeNull();
+  });
+
+  it('returns 404 when enrollment does not belong to the requested course', async () => {
+    const token = await login(lecturer.email);
+
+    // The enrollment belongs to lifecycleCourseId, not isolationCourseId.
+    await request(getApp().getHttpServer())
+      .patch(completionUrl(isolationCourseId, completionEnrollmentId))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(404);
+
+    // Enrollment must remain unchanged.
+    const enrollment = await getPrisma().enrollment.findUniqueOrThrow({
+      where: {
+        id: completionEnrollmentId,
+      },
+    });
+
+    expect(enrollment.status).toBe(EnrollmentStatus.ACTIVE);
+    expect(enrollment.completedAt).toBeNull();
+  });
+
+  it('rejects completing a LEFT enrollment', async () => {
+    const token = await login(lecturer.email);
+
+    await request(getApp().getHttpServer())
+      .patch(completionUrl(lifecycleCourseId, leftEnrollmentId))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(409);
+
+    const enrollment = await getPrisma().enrollment.findUniqueOrThrow({
+      where: {
+        id: leftEnrollmentId,
+      },
+    });
+
+    expect(enrollment.status).toBe(EnrollmentStatus.LEFT);
+  });
+
+  it('rejects completing an already COMPLETED enrollment', async () => {
+    const token = await login(lecturer.email);
+
+    await request(getApp().getHttpServer())
+      .patch(completionUrl(lifecycleCourseId, completedEnrollmentId))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(409);
+
+    const enrollment = await getPrisma().enrollment.findUniqueOrThrow({
+      where: {
+        id: completedEnrollmentId,
+      },
+    });
+
+    expect(enrollment.status).toBe(EnrollmentStatus.COMPLETED);
+  });
+
+  it('allows the owning Lecturer to complete an ACTIVE enrollment', async () => {
+    const token = await login(lecturer.email);
+
+    const response = await request(getApp().getHttpServer())
+      .patch(completionUrl(lifecycleCourseId, completionEnrollmentId))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      enrollmentId: completionEnrollmentId,
+      status: EnrollmentStatus.COMPLETED,
+    });
+
+    expect(response.body.completedAt).toEqual(expect.any(String));
+    expect(Number.isNaN(Date.parse(response.body.completedAt))).toBe(false);
+
+    const enrollment = await getPrisma().enrollment.findUniqueOrThrow({
+      where: {
+        id: completionEnrollmentId,
+      },
+    });
+
+    expect(enrollment.status).toBe(EnrollmentStatus.COMPLETED);
+    expect(enrollment.completedAt).toBeInstanceOf(Date);
   });
 });

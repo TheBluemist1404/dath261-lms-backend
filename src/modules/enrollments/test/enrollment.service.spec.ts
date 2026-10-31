@@ -303,9 +303,7 @@ describe('EnrollmentService', () => {
       expect(prismaMock.enrollment.count).toHaveBeenCalledWith({
         where: {
           userId: USER_ID,
-          status: {
-            not: EnrollmentStatus.LEFT,
-          },
+          status: { not: EnrollmentStatus.LEFT },
         },
       });
 
@@ -313,8 +311,22 @@ describe('EnrollmentService', () => {
         expect.objectContaining({
           where: {
             userId: USER_ID,
-            status: {
-              not: EnrollmentStatus.LEFT,
+            status: { not: EnrollmentStatus.LEFT },
+          },
+          select: {
+            id: true,
+            courseId: true,
+            status: true,
+            enrolledAt: true,
+            leftAt: true,
+            completedAt: true,
+            course: {
+              select: {
+                id: true,
+                title: true,
+                status: true,
+                isSuspended: true,
+              },
             },
           },
           skip: 2,
@@ -450,7 +462,10 @@ describe('EnrollmentService', () => {
       prismaMock.course.findUnique.mockResolvedValue(makeCourse());
       prismaMock.enrollment.findUnique.mockResolvedValue(makeEnrollment(EnrollmentStatus.ACTIVE));
 
-      await expect(service.assertCanAccessCourse(USER_ID, COURSE_ID)).resolves.toBeUndefined();
+      await expect(service.assertCanAccessCourse(USER_ID, COURSE_ID)).resolves.toEqual({
+        id: 'enrollment-1',
+        status: 'ACTIVE',
+      });
     });
 
     it('throws ForbiddenException for a LEFT enrollment', async () => {
@@ -469,6 +484,127 @@ describe('EnrollmentService', () => {
       await expect(service.assertCanAccessCourse(USER_ID, COURSE_ID)).rejects.toBeInstanceOf(
         ForbiddenException,
       );
+    });
+  });
+
+  describe('completeEnrollment', () => {
+    const lecturerId = 'lecturer-1';
+    const otherLecturerId = 'lecturer-2';
+    const courseId = 'course-1';
+    const enrollmentId = 'enrollment-1';
+
+    const activeEnrollment = {
+      id: enrollmentId,
+      courseId,
+      status: EnrollmentStatus.ACTIVE,
+      course: {
+        lecturerId,
+      },
+    };
+
+    beforeEach(() => {
+      txMock.enrollment.findUnique.mockResolvedValue(activeEnrollment);
+
+      txMock.enrollment.updateMany.mockResolvedValue({
+        count: 1,
+      });
+    });
+
+    it('allows the owning Lecturer to complete an ACTIVE enrollment', async () => {
+      const result = await service.completeEnrollment(lecturerId, courseId, enrollmentId);
+
+      expect(prismaMock.$transaction).toHaveBeenCalledOnce();
+
+      expect(txMock.enrollment.findUnique).toHaveBeenCalledWith({
+        where: {
+          id: enrollmentId,
+        },
+        select: {
+          id: true,
+          courseId: true,
+          status: true,
+          course: {
+            select: {
+              lecturerId: true,
+            },
+          },
+        },
+      });
+
+      expect(txMock.enrollment.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: enrollmentId,
+          courseId,
+          status: EnrollmentStatus.ACTIVE,
+        },
+        data: {
+          status: EnrollmentStatus.COMPLETED,
+          completedAt: expect.any(Date),
+        },
+      });
+
+      expect(result).toMatchObject({
+        enrollmentId,
+        status: EnrollmentStatus.COMPLETED,
+        completedAt: expect.any(Date),
+      });
+    });
+
+    it('throws NotFoundException when enrollment does not exist', async () => {
+      txMock.enrollment.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.completeEnrollment(lecturerId, courseId, enrollmentId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(txMock.enrollment.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when enrollment belongs to another course', async () => {
+      txMock.enrollment.findUnique.mockResolvedValue({
+        ...activeEnrollment,
+        courseId: 'another-course',
+      });
+
+      await expect(
+        service.completeEnrollment(lecturerId, courseId, enrollmentId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(txMock.enrollment.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when Lecturer does not own the course', async () => {
+      await expect(
+        service.completeEnrollment(otherLecturerId, courseId, enrollmentId),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(txMock.enrollment.updateMany).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      EnrollmentStatus.LEFT,
+      EnrollmentStatus.COMPLETED,
+    ])('rejects completion when enrollment status is %s', async (status) => {
+      txMock.enrollment.findUnique.mockResolvedValue({
+        ...activeEnrollment,
+        status,
+      });
+
+      await expect(
+        service.completeEnrollment(lecturerId, courseId, enrollmentId),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(txMock.enrollment.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException when enrollment state changes concurrently', async () => {
+      txMock.enrollment.updateMany.mockResolvedValue({
+        count: 0,
+      });
+
+      await expect(
+        service.completeEnrollment(lecturerId, courseId, enrollmentId),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 });
