@@ -17,6 +17,7 @@ import {
 } from '../../../generated/prisma/client.js';
 
 import { PrismaService } from '../../../infrastructure/database/prisma/prisma.service.js';
+import { EnrollmentService } from '../../enrollments/enrollment.service.js';
 import { ProgressService } from './../progress.service.js';
 
 const USER_ID = 'student-1';
@@ -58,6 +59,19 @@ const prismaMock = {
   $transaction: vi.fn(),
 };
 
+const enrollmentServiceMock = {
+  assertCanAccessCourse: vi.fn().mockResolvedValue({
+    id: ENROLLMENT_ID,
+    status: EnrollmentStatus.ACTIVE,
+  }),
+  assertLecturerCanAccessEnrollment: vi.fn().mockResolvedValue({
+    id: ENROLLMENT_ID,
+    status: EnrollmentStatus.ACTIVE,
+    course: { lecturerId: LECTURER_ID },
+    user: { id: USER_ID, firstName: 'Test', lastName: 'User' },
+  }),
+};
+
 const publishedCourse: {
   id: string;
   lecturerId: string;
@@ -81,14 +95,22 @@ function makeEnrollment(status: EnrollmentStatus = EnrollmentStatus.ACTIVE) {
 
 function mockStudentContext(
   status: EnrollmentStatus = EnrollmentStatus.ACTIVE,
-  course = publishedCourse,
+  course: { status?: CourseStatus; isSuspended?: boolean } = publishedCourse,
 ) {
-  tx.course.findUnique.mockResolvedValue(course);
-
-  tx.enrollment.findUnique.mockResolvedValue({
-    id: ENROLLMENT_ID,
-    status,
-  });
+  if (
+    (status === EnrollmentStatus.ACTIVE || status === EnrollmentStatus.COMPLETED) &&
+    course.status !== CourseStatus.DRAFT &&
+    !course.isSuspended
+  ) {
+    enrollmentServiceMock.assertCanAccessCourse.mockResolvedValue({
+      id: ENROLLMENT_ID,
+      status,
+    });
+  } else {
+    enrollmentServiceMock.assertCanAccessCourse.mockRejectedValue(
+      new ForbiddenException('Course or enrollment is not accessible.'),
+    );
+  }
 }
 
 describe('ProgressService', () => {
@@ -136,7 +158,10 @@ describe('ProgressService', () => {
     tx.quizAttempt.findMany.mockResolvedValue([]);
     tx.assignmentSubmission.findMany.mockResolvedValue([]);
 
-    service = new ProgressService(prismaMock as unknown as PrismaService);
+    service = new ProgressService(
+      prismaMock as unknown as PrismaService,
+      enrollmentServiceMock as unknown as EnrollmentService,
+    );
   });
 
   // ==================================================
@@ -540,13 +565,7 @@ describe('ProgressService', () => {
 
   describe('markAssessmentBlockCompleted', () => {
     function mockAssessment(type: typeof BlockType.QUIZ | typeof BlockType.ASSIGNMENT) {
-      tx.enrollment.findUnique.mockResolvedValue({
-        ...makeEnrollment(),
-        course: {
-          status: CourseStatus.PUBLISHED,
-          isSuspended: false,
-        },
-      });
+      mockStudentContext(EnrollmentStatus.ACTIVE);
 
       tx.courseBlock.findUnique.mockResolvedValue({
         id: 'assessment-1',
@@ -567,7 +586,8 @@ describe('ProgressService', () => {
 
       await service.markAssessmentBlockCompleted(
         tx as unknown as Prisma.TransactionClient,
-        ENROLLMENT_ID,
+        USER_ID,
+        COURSE_ID,
         'assessment-1',
         BlockType.QUIZ,
       );
@@ -589,7 +609,8 @@ describe('ProgressService', () => {
       await expect(
         service.markAssessmentBlockCompleted(
           tx as unknown as Prisma.TransactionClient,
-          ENROLLMENT_ID,
+          USER_ID,
+          COURSE_ID,
           'assessment-1',
           BlockType.QUIZ,
         ),
@@ -608,7 +629,8 @@ describe('ProgressService', () => {
 
       await service.markAssessmentBlockCompleted(
         tx as unknown as Prisma.TransactionClient,
-        ENROLLMENT_ID,
+        USER_ID,
+        COURSE_ID,
         'assessment-1',
         BlockType.ASSIGNMENT,
       );
@@ -623,7 +645,8 @@ describe('ProgressService', () => {
       await expect(
         service.markAssessmentBlockCompleted(
           tx as unknown as Prisma.TransactionClient,
-          ENROLLMENT_ID,
+          USER_ID,
+          COURSE_ID,
           'assessment-1',
           BlockType.ASSIGNMENT,
         ),
@@ -641,7 +664,8 @@ describe('ProgressService', () => {
 
       await service.markAssessmentBlockCompleted(
         tx as unknown as Prisma.TransactionClient,
-        ENROLLMENT_ID,
+        USER_ID,
+        COURSE_ID,
         'assessment-1',
         BlockType.QUIZ,
       );
@@ -662,13 +686,13 @@ describe('ProgressService', () => {
         size: 1024,
       };
 
-      tx.course.findUnique.mockResolvedValue(publishedCourse);
-
-      tx.enrollment.findFirst.mockResolvedValue({
-        ...makeEnrollment(),
+      enrollmentServiceMock.assertLecturerCanAccessEnrollment.mockResolvedValue({
+        id: ENROLLMENT_ID,
+        status: EnrollmentStatus.ACTIVE,
         enrolledAt: new Date('2026-01-01T00:00:00Z'),
         leftAt: null,
         completedAt: null,
+        course: { lecturerId: LECTURER_ID },
         user: {
           id: USER_ID,
           email: 'student@example.test',
@@ -721,79 +745,10 @@ describe('ProgressService', () => {
       );
 
       expect(result.student.firstName).toBeNull();
-
-      // JSON arrays must not be incorrectly restricted to objects.
       expect(result.quizAttempts[0].answers).toEqual(answers);
-
-      // JSON objects must also be preserved.
       expect(result.assignmentSubmissions[0].fileMetadata).toEqual(fileMetadata);
-
       expect(result.quizAttempts[0].score).toBe('85.50');
       expect(result.assignmentSubmissions[0].score).toBe('90.00');
-    });
-
-    it('rejects Lecturer who does not own the course', async () => {
-      tx.course.findUnique.mockResolvedValue(publishedCourse);
-
-      await expect(
-        service.getLecturerStudentProgress(OTHER_LECTURER_ID, COURSE_ID, ENROLLMENT_ID),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-
-      expect(tx.enrollment.findFirst).not.toHaveBeenCalled();
-    });
-
-    it('rejects an enrollment belonging to another course', async () => {
-      tx.course.findUnique.mockResolvedValue(publishedCourse);
-      tx.enrollment.findFirst.mockResolvedValue(null);
-
-      await expect(
-        service.getLecturerStudentProgress(LECTURER_ID, COURSE_ID, ENROLLMENT_ID),
-      ).rejects.toBeInstanceOf(NotFoundException);
-    });
-  });
-
-  describe('completeEnrollment', () => {
-    it('allows the owning Lecturer to complete an ACTIVE enrollment', async () => {
-      tx.course.findUnique.mockResolvedValue(publishedCourse);
-      tx.enrollment.findFirst.mockResolvedValue(makeEnrollment(EnrollmentStatus.ACTIVE));
-
-      const result = await service.completeEnrollment(LECTURER_ID, COURSE_ID, ENROLLMENT_ID);
-
-      expect(tx.enrollment.updateMany).toHaveBeenCalledWith({
-        where: {
-          id: ENROLLMENT_ID,
-          courseId: COURSE_ID,
-          status: EnrollmentStatus.ACTIVE,
-        },
-        data: {
-          status: EnrollmentStatus.COMPLETED,
-          completedAt: expect.any(Date),
-        },
-      });
-
-      expect(result.status).toBe(EnrollmentStatus.COMPLETED);
-    });
-
-    it('rejects Lecturer who does not own the course', async () => {
-      tx.course.findUnique.mockResolvedValue(publishedCourse);
-
-      await expect(
-        service.completeEnrollment(OTHER_LECTURER_ID, COURSE_ID, ENROLLMENT_ID),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-
-      expect(tx.enrollment.updateMany).not.toHaveBeenCalled();
-    });
-
-    it.each([
-      EnrollmentStatus.LEFT,
-      EnrollmentStatus.COMPLETED,
-    ])('rejects completion from %s enrollment', async (status) => {
-      tx.course.findUnique.mockResolvedValue(publishedCourse);
-      tx.enrollment.findFirst.mockResolvedValue(makeEnrollment(status));
-
-      await expect(
-        service.completeEnrollment(LECTURER_ID, COURSE_ID, ENROLLMENT_ID),
-      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 });

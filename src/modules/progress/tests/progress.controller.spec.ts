@@ -20,7 +20,6 @@ describe('ProgressController', () => {
     getStudentProgress: vi.fn(),
     getResumePosition: vi.fn(),
     getLecturerStudentProgress: vi.fn(),
-    completeEnrollment: vi.fn(),
   };
 
   const studentRequest = {
@@ -330,37 +329,6 @@ describe('ProgressController', () => {
       );
 
       expect(progressServiceMock.getLecturerStudentProgress).toHaveBeenCalledWith(
-        LECTURER_ID,
-        COURSE_ID,
-        ENROLLMENT_ID,
-      );
-
-      expect(result).toEqual(expectedResponse);
-    });
-  });
-
-  // ==================================================
-  // LECTURER: COMPLETE ENROLLMENT
-  // ==================================================
-
-  describe('completeEnrollment', () => {
-    it('passes authenticated Lecturer ID to service', async () => {
-      const params = {
-        courseId: COURSE_ID,
-        enrollmentId: ENROLLMENT_ID,
-      };
-
-      const expectedResponse = {
-        enrollmentId: ENROLLMENT_ID,
-        status: EnrollmentStatus.COMPLETED,
-        completedAt: new Date(),
-      };
-
-      progressServiceMock.completeEnrollment.mockResolvedValue(expectedResponse);
-
-      const result = await controller.completeEnrollment(params as never, lecturerRequest as never);
-
-      expect(progressServiceMock.completeEnrollment).toHaveBeenCalledWith(
         LECTURER_ID,
         COURSE_ID,
         ENROLLMENT_ID,

@@ -24,7 +24,6 @@ import {
 } from './dto/progress-params.dto.js';
 import {
   BlockProgressMutationResponseDto,
-  EnrollmentCompletionResponseDto,
   ResumePositionResponseDto,
   StudentProgressResponseDto,
 } from './dto/progress-response.dto.js';
@@ -125,25 +124,6 @@ export class ProgressController {
     @Req() req: AuthenticatedRequest,
   ): Promise<LecturerStudentProgressResponseDto> {
     return this.progressService.getLecturerStudentProgress(
-      req.user.userId,
-      params.courseId,
-      params.enrollmentId,
-    );
-  }
-
-  @Patch('courses/:courseId/enrollments/:enrollmentId/complete')
-  @Roles(UserRole.LECTURER)
-  @ApiOperation({
-    summary: 'Manually mark a student enrollment as completed',
-  })
-  @ApiOkResponse({
-    type: EnrollmentCompletionResponseDto,
-  })
-  async completeEnrollment(
-    @Param() params: CourseEnrollmentParamsDto,
-    @Req() req: AuthenticatedRequest,
-  ) {
-    return this.progressService.completeEnrollment(
       req.user.userId,
       params.courseId,
       params.enrollmentId,

@@ -16,6 +16,7 @@ import {
 } from '../../generated/prisma/client.js';
 
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { EnrollmentService } from '../enrollments/enrollment.service.js';
 import type { UpdateBlockCompletionDto } from './dto/update-block-completion.dto.js';
 import type { UpdateLearningPositionDto } from './dto/update-learning-position.dto.js';
 import type { ResumeData } from './types/resume-data.type.js';
@@ -34,7 +35,10 @@ const RESUMABLE_BLOCK_TYPES = TRACKED_BLOCK_TYPES;
 
 @Injectable()
 export class ProgressService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly enrollmentService: EnrollmentService,
+  ) {}
 
   // Student: Update completion
 
@@ -45,7 +49,7 @@ export class ProgressService {
     dto: UpdateBlockCompletionDto,
   ) {
     return this.prisma.$transaction(async (tx) => {
-      const { enrollment } = await this.getStudentContext(tx, userId, courseId, true);
+      const enrollment = await this.getStudentContext(tx, userId, courseId, true);
 
       const block = await tx.courseBlock.findFirst({
         where: {
@@ -102,7 +106,7 @@ export class ProgressService {
     dto: UpdateLearningPositionDto,
   ) {
     return this.prisma.$transaction(async (tx) => {
-      const { enrollment } = await this.getStudentContext(tx, userId, courseId, true);
+      const enrollment = await this.getStudentContext(tx, userId, courseId, true);
 
       const block = await tx.courseBlock.findFirst({
         where: {
@@ -174,7 +178,7 @@ export class ProgressService {
 
   async getStudentProgress(userId: string, courseId: string) {
     return this.prisma.$transaction(async (tx) => {
-      const { enrollment } = await this.getStudentContext(tx, userId, courseId, false);
+      const enrollment = await this.getStudentContext(tx, userId, courseId, false);
 
       const snapshot = await this.getProgressSnapshot(tx, courseId, enrollment.id);
 
@@ -193,7 +197,7 @@ export class ProgressService {
 
   async getResumePosition(userId: string, courseId: string) {
     return this.prisma.$transaction(async (tx) => {
-      const { enrollment } = await this.getStudentContext(tx, userId, courseId, false);
+      const enrollment = await this.getStudentContext(tx, userId, courseId, false);
 
       const lastVisited = await tx.blockProgress.findFirst({
         where: {
@@ -250,57 +254,21 @@ export class ProgressService {
 
   async getLecturerStudentProgress(lecturerId: string, courseId: string, enrollmentId: string) {
     return this.prisma.$transaction(async (tx) => {
-      const course = await tx.course.findUnique({
-        where: {
-          id: courseId,
-        },
-        select: {
-          id: true,
-          lecturerId: true,
-        },
-      });
-
-      if (!course) {
-        throw new NotFoundException('Course not found.');
-      }
-
-      if (course.lecturerId !== lecturerId) {
-        throw new ForbiddenException('You do not own this course.');
-      }
-
-      const enrollment = await tx.enrollment.findFirst({
-        where: {
-          id: enrollmentId,
-          courseId,
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-        },
-      });
-
-      if (!enrollment) {
-        throw new NotFoundException('Enrollment not found.');
-      }
+      const enrollment = await this.enrollmentService.assertLecturerCanAccessEnrollment(
+        tx,
+        lecturerId,
+        courseId,
+        enrollmentId,
+      );
 
       const snapshot = await this.getProgressSnapshot(tx, courseId, enrollment.id);
 
       const quizAttempts = await tx.quizAttempt.findMany({
         where: {
           enrollmentId,
-          quizBlock: {
-            is: { courseId },
-          },
+          quizBlock: { is: { courseId } },
         },
-        orderBy: {
-          startedAt: 'desc',
-        },
+        orderBy: { startedAt: 'desc' },
         select: {
           id: true,
           courseBlockId: true,
@@ -311,24 +279,16 @@ export class ProgressService {
           startedAt: true,
           submittedAt: true,
           gradedAt: true,
-          quizBlock: {
-            select: {
-              title: true,
-            },
-          },
+          quizBlock: { select: { title: true } },
         },
       });
 
       const assignmentSubmissions = await tx.assignmentSubmission.findMany({
         where: {
           enrollmentId,
-          assignmentBlock: {
-            is: { courseId },
-          },
+          assignmentBlock: { is: { courseId } },
         },
-        orderBy: {
-          submittedAt: 'desc',
-        },
+        orderBy: { submittedAt: 'desc' },
         select: {
           id: true,
           courseBlockId: true,
@@ -340,11 +300,7 @@ export class ProgressService {
           feedback: true,
           submittedAt: true,
           gradedAt: true,
-          assignmentBlock: {
-            select: {
-              title: true,
-            },
-          },
+          assignmentBlock: { select: { title: true } },
         },
       });
 
@@ -363,7 +319,6 @@ export class ProgressService {
           ...attempt,
           score: attempt.score?.toString() ?? null,
         })),
-
         assignmentSubmissions: assignmentSubmissions.map((submission) => ({
           ...submission,
           score: submission.score?.toString() ?? null,
@@ -372,116 +327,24 @@ export class ProgressService {
     });
   }
 
-  // -----------------------------------------------
-  // Lecturer: Manually complete enrollment
-  // -----------------------------------------------
-
-  async completeEnrollment(lecturerId: string, courseId: string, enrollmentId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      const course = await tx.course.findUnique({
-        where: { id: courseId },
-        select: {
-          id: true,
-          lecturerId: true,
-        },
-      });
-
-      if (!course) {
-        throw new NotFoundException('Course not found.');
-      }
-
-      if (course.lecturerId !== lecturerId) {
-        throw new ForbiddenException('You do not own this course.');
-      }
-
-      const enrollment = await tx.enrollment.findFirst({
-        where: {
-          id: enrollmentId,
-          courseId,
-        },
-        select: {
-          id: true,
-          status: true,
-        },
-      });
-
-      if (!enrollment) {
-        throw new NotFoundException('Enrollment not found.');
-      }
-
-      if (enrollment.status !== EnrollmentStatus.ACTIVE) {
-        throw new ConflictException('Only ACTIVE enrollments can be completed.');
-      }
-
-      const now = new Date();
-
-      const result = await tx.enrollment.updateMany({
-        where: {
-          id: enrollmentId,
-          courseId,
-          status: EnrollmentStatus.ACTIVE,
-        },
-        data: {
-          status: EnrollmentStatus.COMPLETED,
-          completedAt: now,
-        },
-      });
-
-      if (result.count !== 1) {
-        throw new ConflictException('The enrollment state changed. Please retry.');
-      }
-
-      return {
-        enrollmentId,
-        status: EnrollmentStatus.COMPLETED,
-        completedAt: now,
-      };
-    });
-  }
-
-  // -----------------------------------------------
-  // Called by QuizService / AssignmentService
-  // after a successful submission.
-  // Must receive the caller's existing transaction.
-  // -----------------------------------------------
-
   async markAssessmentBlockCompleted(
     tx: Prisma.TransactionClient,
-    enrollmentId: string,
+    userId: string,
+    courseId: string,
     courseBlockId: string,
     expectedType: typeof BlockType.QUIZ | typeof BlockType.ASSIGNMENT,
   ): Promise<void> {
-    const [enrollment, block] = await Promise.all([
-      tx.enrollment.findUnique({
-        where: { id: enrollmentId },
-        select: {
-          id: true,
-          courseId: true,
-          status: true,
-          course: {
-            select: {
-              status: true,
-              isSuspended: true,
-            },
-          },
-        },
-      }),
+    const enrollment = await this.getStudentContext(tx, userId, courseId, true);
+    const block = await tx.courseBlock.findUnique({
+      where: { id: courseBlockId },
+      select: { id: true, courseId: true, type: true },
+    });
 
-      tx.courseBlock.findUnique({
-        where: { id: courseBlockId },
-        select: {
-          id: true,
-          courseId: true,
-          type: true,
-        },
-      }),
-    ]);
-
-    if (!enrollment || !block) {
-      throw new NotFoundException('Enrollment or course block not found.');
+    if (!block) {
+      throw new NotFoundException('Course block not found.');
     }
 
-    if (enrollment.courseId !== block.courseId || block.type !== expectedType) {
+    if (block.courseId !== courseId || block.type !== expectedType) {
       throw new BadRequestException(
         'The assessment block does not belong to this enrollment course.',
       );
@@ -490,15 +353,13 @@ export class ProgressService {
     if (expectedType === BlockType.QUIZ) {
       const submittedAttempt = await tx.quizAttempt.findFirst({
         where: {
-          enrollmentId,
+          enrollmentId: enrollment.id,
           courseBlockId,
           status: {
             in: [QuizAttemptStatus.SUBMITTED, QuizAttemptStatus.GRADED],
           },
         },
-        select: {
-          id: true,
-        },
+        select: { id: true },
       });
 
       if (!submittedAttempt) {
@@ -506,20 +367,16 @@ export class ProgressService {
           'A submitted quiz attempt is required to complete this block.',
         );
       }
-    }
-
-    if (expectedType === BlockType.ASSIGNMENT) {
+    } else {
       const submittedAssignment = await tx.assignmentSubmission.findFirst({
         where: {
-          enrollmentId,
+          enrollmentId: enrollment.id,
           courseBlockId,
           status: {
             in: [AssignmentSubmissionStatus.SUBMITTED, AssignmentSubmissionStatus.GRADED],
           },
         },
-        select: {
-          id: true,
-        },
+        select: { id: true },
       });
 
       if (!submittedAssignment) {
@@ -527,43 +384,30 @@ export class ProgressService {
       }
     }
 
-    if (
-      enrollment.status !== EnrollmentStatus.ACTIVE ||
-      enrollment.course.status !== CourseStatus.PUBLISHED ||
-      enrollment.course.isSuspended
-    ) {
-      throw new ForbiddenException('This enrollment cannot complete an assessment.');
-    }
-
     const existing = await tx.blockProgress.findUnique({
       where: {
         enrollmentId_courseBlockId: {
-          enrollmentId,
+          enrollmentId: enrollment.id,
           courseBlockId,
         },
       },
-      select: {
-        completed: true,
-      },
+      select: { completed: true },
     });
 
-    // Additional attempts must not repeatedly change the
-    // original completion timestamp.
     if (existing?.completed) {
       return;
     }
 
     const now = new Date();
-
     await tx.blockProgress.upsert({
       where: {
         enrollmentId_courseBlockId: {
-          enrollmentId,
+          enrollmentId: enrollment.id,
           courseBlockId,
         },
       },
       create: {
-        enrollmentId,
+        enrollmentId: enrollment.id,
         courseBlockId,
         completed: true,
         completedAt: now,
@@ -581,48 +425,12 @@ export class ProgressService {
     courseId: string,
     write: boolean,
   ) {
-    const course = await tx.course.findUnique({
-      where: { id: courseId },
-      select: {
-        id: true,
-        status: true,
-        isSuspended: true,
-      },
-    });
+    const context = await this.enrollmentService.assertCanAccessCourse(userId, courseId, tx);
 
-    if (!course) {
-      throw new NotFoundException('Course not found.');
-    }
-
-    if (course.status !== CourseStatus.PUBLISHED || course.isSuspended) {
-      throw new ForbiddenException('Course progress is currently unavailable.');
-    }
-
-    const enrollment = await tx.enrollment.findUnique({
-      where: {
-        userId_courseId: {
-          userId,
-          courseId,
-        },
-      },
-      select: {
-        id: true,
-        status: true,
-      },
-    });
-
-    if (!enrollment || enrollment.status === EnrollmentStatus.LEFT) {
-      throw new ForbiddenException('You do not have access to this course.');
-    }
-
-    if (write && enrollment.status !== EnrollmentStatus.ACTIVE) {
+    if (write && context.status !== EnrollmentStatus.ACTIVE) {
       throw new ForbiddenException('Only ACTIVE enrollments can update progress.');
     }
-
-    return {
-      course,
-      enrollment,
-    };
+    return context;
   }
 
   private async getProgressSnapshot(

@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -29,8 +30,9 @@ import { UserRole } from '../../generated/prisma/client.js';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { Roles } from '../authorization/roles.decorator.js';
 import { RolesGuard } from '../authorization/roles.guard.js';
-import { CourseIdParamDto } from './dto/course-id-param.dto.js';
+import { CourseEnrollmentParamsDto, CourseIdParamDto } from './dto/course-id-param.dto.js';
 import { EnrollmentActionResponseDto } from './dto/enrollment-action-response.dto.js';
+import { EnrollmentCompletionResponseDto } from './dto/enrollment-completion-response.dto.js';
 import { EnrollmentStateResponseDto } from './dto/enrollment-state-response.dto.js';
 import { MyEnrollmentsQueryDto } from './dto/my-enrollments-query.dto.js';
 import { PaginatedMyCoursesResponseDto } from './dto/paginated-my-courses-response.dto.js';
@@ -135,5 +137,34 @@ export class EnrollmentController {
     @Req() req: AuthenticatedRequest,
   ): Promise<EnrollmentStateResponseDto> {
     return this.enrollmentService.getCourseEnrollmentState(req.user.userId, params.courseId);
+  }
+
+  @Patch('courses/:courseId/enrollments/:enrollmentId/complete')
+  @Roles(UserRole.LECTURER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Manually complete a student enrollment',
+    description:
+      'Allows the Lecturer who owns the course to manually complete an ACTIVE enrollment.',
+  })
+  @ApiOkResponse({
+    description: 'Enrollment successfully completed.',
+    type: EnrollmentCompletionResponseDto,
+  })
+  @ApiForbiddenResponse({
+    description: 'The Lecturer does not own this course.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Enrollment not found in this course.',
+  })
+  @ApiConflictResponse({
+    description: 'Only ACTIVE enrollments can be completed.',
+  })
+  async completeEnrollment(
+    @Param('courseId') courseId: string,
+    @Param('enrollmentId') enrollmentId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<EnrollmentCompletionResponseDto> {
+    return this.enrollmentService.completeEnrollment(req.user.userId, courseId, enrollmentId);
   }
 }

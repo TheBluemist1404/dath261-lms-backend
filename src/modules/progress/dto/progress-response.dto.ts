@@ -116,14 +116,3 @@ export class BlockProgressMutationResponseDto {
   @ApiProperty({ nullable: true })
   lastVisitedAt!: Date | null;
 }
-
-export class EnrollmentCompletionResponseDto {
-  @ApiProperty()
-  enrollmentId!: string;
-
-  @ApiProperty({ enum: EnrollmentStatus })
-  status!: EnrollmentStatus;
-
-  @ApiProperty()
-  completedAt!: Date;
-}

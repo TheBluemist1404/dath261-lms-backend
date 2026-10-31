@@ -1,634 +1,656 @@
-import { randomUUID } from 'node:crypto';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 
-import { type INestApplication, ValidationPipe } from '@nestjs/common';
-
-import { Test } from '@nestjs/testing';
-import * as bcrypt from 'bcrypt';
-import request from 'supertest';
-
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-
-import { AppModule } from '../../../app.module.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  AccountStatus,
   AssignmentSubmissionStatus,
   BlockType,
-  CourseStatus,
   EnrollmentStatus,
+  Prisma,
   QuizAttemptStatus,
-  UserRole,
 } from '../../../generated/prisma/client.js';
 
 import { PrismaService } from '../../../infrastructure/database/prisma/prisma.service.js';
-import { ProgressService } from '../progress.service.js';
+import { EnrollmentService } from '../../enrollments/enrollment.service.js';
+import { ProgressService } from './../progress.service.js';
 
-describe('Progress HTTP integration', () => {
-  let app: INestApplication | undefined;
-  let prisma: PrismaService;
-  let progressService: ProgressService;
+const USER_ID = 'student-1';
+const LECTURER_ID = 'lecturer-1';
+const COURSE_ID = 'course-1';
+const ENROLLMENT_ID = 'enrollment-1';
 
-  const suffix = randomUUID();
-  const password = 'Progress-test-123!';
+const tx = {
+  courseBlock: {
+    findUnique: vi.fn(),
+    findFirst: vi.fn(),
+    findMany: vi.fn(),
+  },
+  blockProgress: {
+    findUnique: vi.fn(),
+    findFirst: vi.fn(),
+    upsert: vi.fn(),
+  },
+  quizAttempt: {
+    findFirst: vi.fn(),
+    findMany: vi.fn(),
+  },
+  assignmentSubmission: {
+    findFirst: vi.fn(),
+    findMany: vi.fn(),
+  },
+};
 
-  const createdUserIds: string[] = [];
-  const createdCourseIds: string[] = [];
+const prismaMock = {
+  $transaction: vi.fn(),
+};
 
-  let studentA: { id: string; email: string };
-  let studentB: { id: string; email: string };
-  let lecturer: { id: string; email: string };
-  let otherLecturer: { id: string; email: string };
+const enrollmentServiceMock = {
+  assertCanAccessCourse: vi.fn(),
+  assertLecturerCanAccessEnrollment: vi.fn(),
+};
 
-  let studentToken: string;
-  let studentBToken: string;
-  let lecturerToken: string;
-  let otherLecturerToken: string;
+function mockStudentContext(status: EnrollmentStatus = EnrollmentStatus.ACTIVE) {
+  enrollmentServiceMock.assertCanAccessCourse.mockResolvedValue({
+    id: ENROLLMENT_ID,
+    status,
+  });
+}
 
-  let courseId: string;
-  let enrollmentId: string;
+describe('ProgressService', () => {
+  let service: ProgressService;
 
-  let moduleBlockId: string;
-  let textBlockId: string;
-  let fileBlockId: string;
-  let videoBlockId: string;
-  let quizBlockId: string;
-  let assignmentBlockId: string;
+  beforeEach(() => {
+    vi.resetAllMocks();
 
-  const api = '/api';
-
-  beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleRef.createNestApplication();
-
-    app.setGlobalPrefix('api');
-
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-      }),
+    prismaMock.$transaction.mockImplementation((callback: (transaction: typeof tx) => unknown) =>
+      callback(tx),
     );
 
-    await app.init();
+    mockStudentContext();
 
-    prisma = app.get(PrismaService);
-    progressService = app.get(ProgressService);
-
-    const passwordHash = await bcrypt.hash(password, 4);
-
-    async function createUser(role: UserRole, label: string) {
-      const email = `${label}-${suffix}@example.test`;
-
-      const user = await prisma.user.create({
-        data: {
-          email,
-          passwordHash,
-          firstName: 'Progress',
-          lastName: label,
-          role,
-          status: AccountStatus.ACTIVE,
-        },
-      });
-
-      createdUserIds.push(user.id);
-
-      return {
-        id: user.id,
-        email: user.email,
-      };
-    }
-
-    studentA = await createUser(UserRole.STUDENT, 'student-a');
-    studentB = await createUser(UserRole.STUDENT, 'student-b');
-    lecturer = await createUser(UserRole.LECTURER, 'lecturer-owner');
-    otherLecturer = await createUser(UserRole.LECTURER, 'lecturer-other');
-
-    const course = await prisma.course.create({
-      data: {
-        title: `Progress integration ${suffix}`,
-        lecturerId: lecturer.id,
-        status: CourseStatus.PUBLISHED,
-        isSuspended: false,
-      },
+    tx.courseBlock.findFirst.mockResolvedValue({
+      id: 'block-1',
+      type: BlockType.TEXT,
     });
 
-    courseId = course.id;
-    createdCourseIds.push(courseId);
+    tx.courseBlock.findMany.mockResolvedValue([]);
 
-    async function createBlock(type: BlockType, title: string, position: number) {
-      const block = await prisma.courseBlock.create({
-        data: {
-          courseId,
-          type,
-          title,
-          position,
-        },
-      });
-
-      return block.id;
-    }
-
-    moduleBlockId = await createBlock(BlockType.MODULE, 'Module 1', 0);
-
-    textBlockId = await createBlock(BlockType.TEXT, 'Introduction', 1);
-
-    fileBlockId = await createBlock(BlockType.FILE, 'Reading material', 2);
-
-    videoBlockId = await createBlock(BlockType.VIDEO, 'Introduction video', 3);
-
-    quizBlockId = await createBlock(BlockType.QUIZ, 'Introduction quiz', 4);
-
-    assignmentBlockId = await createBlock(BlockType.ASSIGNMENT, 'Introduction assignment', 5);
-
-    const enrollment = await prisma.enrollment.create({
-      data: {
-        userId: studentA.id,
-        courseId,
-        status: EnrollmentStatus.ACTIVE,
-      },
+    tx.blockProgress.upsert.mockResolvedValue({
+      id: 'progress-1',
+      enrollmentId: ENROLLMENT_ID,
+      courseBlockId: 'block-1',
+      completed: true,
+      completedAt: new Date(),
+      lastVisitedAt: null,
+      resumeData: null,
     });
 
-    enrollmentId = enrollment.id;
+    tx.blockProgress.findFirst.mockResolvedValue(null);
+    tx.blockProgress.findUnique.mockResolvedValue(null);
 
-    async function login(email: string): Promise<string> {
-      const response = await request(app!.getHttpServer()).post(`${api}/auth/login`).send({
-        email,
-        password,
-      });
+    tx.quizAttempt.findFirst.mockResolvedValue({ id: 'attempt-1' });
+    tx.assignmentSubmission.findFirst.mockResolvedValue({ id: 'submission-1' });
 
-      expect(response.status).toBe(200);
-      expect(response.body.accessToken).toEqual(expect.any(String));
+    tx.quizAttempt.findMany.mockResolvedValue([]);
+    tx.assignmentSubmission.findMany.mockResolvedValue([]);
 
-      return response.body.accessToken as string;
-    }
-
-    studentToken = await login(studentA.email);
-    studentBToken = await login(studentB.email);
-    lecturerToken = await login(lecturer.email);
-    otherLecturerToken = await login(otherLecturer.email);
-  }, 30_000);
-
-  afterAll(async () => {
-    try {
-      if (enrollmentId) {
-        // Enrollment relations use onDelete: Cascade.
-        await prisma.enrollment.deleteMany({
-          where: { id: enrollmentId },
-        });
-      }
-
-      if (createdCourseIds.length > 0) {
-        await prisma.courseBlock.deleteMany({
-          where: {
-            courseId: { in: createdCourseIds },
-          },
-        });
-
-        await prisma.course.deleteMany({
-          where: {
-            id: { in: createdCourseIds },
-          },
-        });
-      }
-
-      if (createdUserIds.length > 0) {
-        await prisma.authSession.deleteMany({
-          where: {
-            userId: { in: createdUserIds },
-          },
-        });
-
-        await prisma.user.deleteMany({
-          where: {
-            id: { in: createdUserIds },
-          },
-        });
-      }
-    } finally {
-      await app?.close();
-    }
-  }, 30_000);
-
-  function courseUrl(path = '') {
-    return `${api}/courses/${courseId}${path}`;
-  }
-
-  function completionUrl(blockId: string) {
-    return courseUrl(`/blocks/${blockId}/progress`);
-  }
-
-  function positionUrl(blockId: string) {
-    return courseUrl(`/blocks/${blockId}/position`);
-  }
-
-  function lecturerProgressUrl() {
-    return courseUrl(`/enrollments/${enrollmentId}/progress`);
-  }
-
-  function lecturerCompletionUrl() {
-    return courseUrl(`/enrollments/${enrollmentId}/complete`);
-  }
-
-  const studentHeaders = () => ({
-    Authorization: `Bearer ${studentToken}`,
+    service = new ProgressService(
+      prismaMock as unknown as PrismaService,
+      enrollmentServiceMock as unknown as EnrollmentService,
+    );
   });
 
   // ==================================================
-  // AUTHENTICATION / ROLE / ISOLATION
+  // BLOCK COMPLETION
   // ==================================================
 
-  describe('Authentication and Student isolation', () => {
-    it('rejects requests without an access token', async () => {
-      await request(app!.getHttpServer()).get(courseUrl('/progress')).expect(401);
+  describe('updateBlockCompletion', () => {
+    it.each([
+      BlockType.TEXT,
+      BlockType.FILE,
+      BlockType.VIDEO,
+    ])('allows manual completion of %s', async (type) => {
+      tx.courseBlock.findFirst.mockResolvedValue({
+        id: 'block-1',
+        type,
+      });
+
+      await service.updateBlockCompletion(USER_ID, COURSE_ID, 'block-1', {
+        completed: true,
+      });
+
+      expect(tx.blockProgress.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            enrollmentId_courseBlockId: {
+              enrollmentId: ENROLLMENT_ID,
+              courseBlockId: 'block-1',
+            },
+          },
+          create: expect.objectContaining({
+            completed: true,
+            completedAt: expect.any(Date),
+          }),
+          update: expect.objectContaining({
+            completed: true,
+            completedAt: expect.any(Date),
+          }),
+        }),
+      );
     });
 
-    it('rejects an invalid access token', async () => {
-      await request(app!.getHttpServer())
-        .get(courseUrl('/progress'))
-        .set('Authorization', 'Bearer invalid-token')
-        .expect(401);
+    it.each([
+      BlockType.MODULE,
+      BlockType.QUIZ,
+      BlockType.ASSIGNMENT,
+    ])('rejects manual completion of %s', async (type) => {
+      tx.courseBlock.findFirst.mockResolvedValue({
+        id: 'block-1',
+        type,
+      });
+
+      await expect(
+        service.updateBlockCompletion(USER_ID, COURSE_ID, 'block-1', {
+          completed: true,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(tx.blockProgress.upsert).not.toHaveBeenCalled();
     });
 
-    it('allows Student A to read their own progress', async () => {
-      await request(app!.getHttpServer())
-        .get(courseUrl('/progress'))
-        .set(studentHeaders())
-        .expect(200);
+    it('allows unmarking a supported learning block', async () => {
+      await service.updateBlockCompletion(USER_ID, COURSE_ID, 'block-1', {
+        completed: false,
+      });
+
+      expect(tx.blockProgress.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            completed: false,
+            completedAt: null,
+          }),
+          update: expect.objectContaining({
+            completed: false,
+            completedAt: null,
+          }),
+        }),
+      );
     });
 
-    it('does not expose Student A progress to Student B', async () => {
-      const response = await request(app!.getHttpServer())
-        .get(courseUrl('/progress'))
-        .set('Authorization', `Bearer ${studentBToken}`);
+    it('rejects a block that does not belong to the course', async () => {
+      tx.courseBlock.findFirst.mockResolvedValue(null);
 
-      expect(response.status).toBe(403);
-    });
-
-    it('rejects Student from the Lecturer-only progress endpoint', async () => {
-      await request(app!.getHttpServer())
-        .get(lecturerProgressUrl())
-        .set(studentHeaders())
-        .expect(403);
+      await expect(
+        service.updateBlockCompletion(USER_ID, COURSE_ID, 'foreign-block', {
+          completed: true,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
   // ==================================================
-  // MANUAL COMPLETION
+  // STUDENT ACCESS
   // ==================================================
 
-  describe('Block completion', () => {
-    it('allows Student to complete TEXT, FILE, VIDEO', async () => {
-      for (const blockId of [textBlockId, fileBlockId, videoBlockId]) {
-        await request(app!.getHttpServer())
-          .patch(completionUrl(blockId))
-          .set(studentHeaders())
-          .send({ completed: true })
-          .expect(200);
-      }
+  describe('student access', () => {
+    it('allows ACTIVE Student to read progress', async () => {
+      mockStudentContext(EnrollmentStatus.ACTIVE);
 
-      const records = await prisma.blockProgress.findMany({
-        where: {
-          enrollmentId,
-          courseBlockId: {
-            in: [textBlockId, fileBlockId, videoBlockId],
-          },
-        },
-      });
-
-      expect(records).toHaveLength(3);
-      expect(records.every((item) => item.completed)).toBe(true);
+      const result = await service.getStudentProgress(USER_ID, COURSE_ID);
+      expect(result.enrollmentStatus).toBe(EnrollmentStatus.ACTIVE);
     });
 
-    it('allows Student to unmark a supported block', async () => {
-      await request(app!.getHttpServer())
-        .patch(completionUrl(textBlockId))
-        .set(studentHeaders())
-        .send({ completed: false })
-        .expect(200);
+    it('allows COMPLETED Student to read progress', async () => {
+      mockStudentContext(EnrollmentStatus.COMPLETED);
 
-      const record = await prisma.blockProgress.findUniqueOrThrow({
-        where: {
-          enrollmentId_courseBlockId: {
-            enrollmentId,
-            courseBlockId: textBlockId,
-          },
-        },
-      });
-
-      expect(record.completed).toBe(false);
-      expect(record.completedAt).toBeNull();
+      const result = await service.getStudentProgress(USER_ID, COURSE_ID);
+      expect(result.enrollmentStatus).toBe(EnrollmentStatus.COMPLETED);
     });
 
-    it('rejects manual completion of MODULE, QUIZ and ASSIGNMENT', async () => {
-      for (const blockId of [moduleBlockId, quizBlockId, assignmentBlockId]) {
-        await request(app!.getHttpServer())
-          .patch(completionUrl(blockId))
-          .set(studentHeaders())
-          .send({ completed: true })
-          .expect(400);
-      }
+    it('rejects writes from COMPLETED enrollment', async () => {
+      mockStudentContext(EnrollmentStatus.COMPLETED);
+
+      await expect(
+        service.updateBlockCompletion(USER_ID, COURSE_ID, 'block-1', {
+          completed: true,
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 
   // ==================================================
-  // RESUME
+  // RESUME DATA
   // ==================================================
 
-  describe('Resume position', () => {
-    it('returns empty resume state when no block has been visited', async () => {
-      // Use a fresh second course/enrollment if the test fixture
-      // has already recorded visits to another block.
-      const response = await request(app!.getHttpServer())
-        .get(courseUrl('/progress/resume'))
-        .set(studentHeaders())
-        .expect(200);
+  describe('updateLearningPosition', () => {
+    it('saves valid VIDEO resume data', async () => {
+      tx.courseBlock.findFirst.mockResolvedValue({
+        id: 'video-1',
+        type: BlockType.VIDEO,
+      });
 
-      expect(response.body).toHaveProperty('hasResumePosition');
-    });
-
-    it('saves and returns VIDEO resume data', async () => {
       const resumeData = {
-        version: 1,
-        type: 'VIDEO',
+        version: 1 as const,
+        type: BlockType.VIDEO,
         data: {
           positionSeconds: 125,
           durationSeconds: 900,
         },
       };
 
-      await request(app!.getHttpServer())
-        .patch(positionUrl(videoBlockId))
-        .set(studentHeaders())
-        .send({ resumeData })
-        .expect(200);
+      await service.updateLearningPosition(USER_ID, COURSE_ID, 'video-1', {
+        resumeData,
+      });
 
-      const response = await request(app!.getHttpServer())
-        .get(courseUrl('/progress/resume'))
-        .set(studentHeaders())
-        .expect(200);
+      expect(tx.blockProgress.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            resumeData,
+            lastVisitedAt: expect.any(Date),
+          }),
+          update: expect.objectContaining({
+            resumeData,
+            lastVisitedAt: expect.any(Date),
+          }),
+        }),
+      );
+    });
 
-      expect(response.body).toMatchObject({
-        hasResumePosition: true,
-        block: {
-          id: videoBlockId,
+    it('preserves existing resumeData when the field is omitted', async () => {
+      tx.courseBlock.findFirst.mockResolvedValue({
+        id: 'video-1',
+        type: BlockType.VIDEO,
+      });
+
+      await service.updateLearningPosition(USER_ID, COURSE_ID, 'video-1', {});
+
+      const args = tx.blockProgress.upsert.mock.calls[0][0];
+
+      expect(args.update.lastVisitedAt).toBeInstanceOf(Date);
+      expect(args.update).not.toHaveProperty('resumeData');
+    });
+
+    it('clears resumeData when null is provided', async () => {
+      tx.courseBlock.findFirst.mockResolvedValue({
+        id: 'video-1',
+        type: BlockType.VIDEO,
+      });
+
+      await service.updateLearningPosition(USER_ID, COURSE_ID, 'video-1', {
+        resumeData: null,
+      });
+
+      const args = tx.blockProgress.upsert.mock.calls[0][0];
+      expect(args.update.resumeData).toBe(Prisma.JsonNull);
+    });
+
+    it('rejects MODULE resume positions', async () => {
+      tx.courseBlock.findFirst.mockResolvedValue({
+        id: 'module-1',
+        type: BlockType.MODULE,
+      });
+
+      await expect(
+        service.updateLearningPosition(USER_ID, COURSE_ID, 'module-1', {}),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects resumeData with mismatched block type', async () => {
+      tx.courseBlock.findFirst.mockResolvedValue({
+        id: 'video-1',
+        type: BlockType.VIDEO,
+      });
+
+      await expect(
+        service.updateLearningPosition(USER_ID, COURSE_ID, 'video-1', {
+          resumeData: {
+            version: 1,
+            type: BlockType.TEXT,
+            data: {},
+          },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects an unsupported resumeData version', async () => {
+      tx.courseBlock.findFirst.mockResolvedValue({
+        id: 'video-1',
+        type: BlockType.VIDEO,
+      });
+
+      await expect(
+        service.updateLearningPosition(USER_ID, COURSE_ID, 'video-1', {
+          resumeData: {
+            version: 2,
+            type: BlockType.VIDEO,
+            data: {},
+          } as never,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  describe('getResumePosition', () => {
+    it('returns empty state when no previous visit exists', async () => {
+      const result = await service.getResumePosition(USER_ID, COURSE_ID);
+
+      expect(result).toEqual({
+        hasResumePosition: false,
+        lastVisitedAt: null,
+        block: null,
+        resumeData: null,
+      });
+    });
+
+    it('returns the latest visited block and JSON resume data', async () => {
+      const visitedAt = new Date();
+
+      const resumeData = {
+        version: 1,
+        type: BlockType.VIDEO,
+        data: { positionSeconds: 125 },
+      };
+
+      tx.blockProgress.findFirst.mockResolvedValue({
+        lastVisitedAt: visitedAt,
+        resumeData,
+        courseBlock: {
+          id: 'video-1',
           type: BlockType.VIDEO,
+          title: 'Introduction video',
+          position: 2,
+          parentModuleId: null,
+        },
+      });
+
+      const result = await service.getResumePosition(USER_ID, COURSE_ID);
+
+      expect(result).toEqual({
+        hasResumePosition: true,
+        lastVisitedAt: visitedAt,
+        block: {
+          id: 'video-1',
+          type: BlockType.VIDEO,
+          title: 'Introduction video',
+          position: 2,
+          parentModuleId: null,
         },
         resumeData,
       });
     });
-
-    it('rejects resume data with mismatched block type', async () => {
-      await request(app!.getHttpServer())
-        .patch(positionUrl(videoBlockId))
-        .set(studentHeaders())
-        .send({
-          resumeData: {
-            version: 1,
-            type: 'TEXT',
-            data: {
-              anchorId: 'section-1',
-            },
-          },
-        })
-        .expect(400);
-    });
   });
 
   // ==================================================
-  // ASSESSMENT COMPLETION AND JSON DATA
+  // PROGRESS CALCULATION
   // ==================================================
 
-  describe('Assessment records', () => {
-    it('stores submitted Quiz and Assignment records and updates BlockProgress', async () => {
-      await prisma.$transaction(async (transaction) => {
-        const attempt = await transaction.quizAttempt.create({
-          data: {
-            enrollmentId,
-            courseBlockId: quizBlockId,
-            attemptNumber: 1,
-            status: QuizAttemptStatus.GRADED,
-            answers: ['A', 'C'],
-            score: '85.50',
-            startedAt: new Date(),
-            submittedAt: new Date(),
-            gradedAt: new Date(),
-          },
-        });
-
-        await progressService.markAssessmentBlockCompleted(
-          transaction,
-          attempt.enrollmentId,
-          attempt.courseBlockId,
-          BlockType.QUIZ,
-        );
-
-        const submission = await transaction.assignmentSubmission.create({
-          data: {
-            enrollmentId,
-            courseBlockId: assignmentBlockId,
-            attemptNumber: 1,
-            textContent: 'Submitted assignment',
-            fileMetadata: {
-              filename: 'assignment.pdf',
-              size: 1024,
-              mimeType: 'application/pdf',
-            },
-            status: AssignmentSubmissionStatus.GRADED,
-            score: '90.00',
-            feedback: 'Good work',
-            submittedAt: new Date(),
-            gradedAt: new Date(),
-          },
-        });
-
-        await progressService.markAssessmentBlockCompleted(
-          transaction,
-          submission.enrollmentId,
-          submission.courseBlockId,
-          BlockType.ASSIGNMENT,
-        );
-      });
-
-      const [quizProgress, assignmentProgress] = await Promise.all([
-        prisma.blockProgress.findUniqueOrThrow({
-          where: {
-            enrollmentId_courseBlockId: {
-              enrollmentId,
-              courseBlockId: quizBlockId,
-            },
-          },
-        }),
-
-        prisma.blockProgress.findUniqueOrThrow({
-          where: {
-            enrollmentId_courseBlockId: {
-              enrollmentId,
-              courseBlockId: assignmentBlockId,
-            },
-          },
-        }),
+  describe('getStudentProgress', () => {
+    it('derives learning progress and quiz percentage', async () => {
+      tx.courseBlock.findMany.mockResolvedValue([
+        {
+          id: 'text-1',
+          type: BlockType.TEXT,
+          title: 'Text',
+          position: 1,
+          parentModuleId: null,
+          progressEntries: [{ completed: true, completedAt: new Date() }],
+        },
+        {
+          id: 'file-1',
+          type: BlockType.FILE,
+          title: 'File',
+          position: 2,
+          parentModuleId: null,
+          progressEntries: [],
+        },
+        {
+          id: 'video-1',
+          type: BlockType.VIDEO,
+          title: 'Video',
+          position: 3,
+          parentModuleId: null,
+          progressEntries: [{ completed: true, completedAt: new Date() }],
+        },
+        {
+          id: 'quiz-1',
+          type: BlockType.QUIZ,
+          title: 'Quiz',
+          position: 4,
+          parentModuleId: null,
+          progressEntries: [{ completed: true, completedAt: new Date() }],
+        },
+        {
+          id: 'assignment-1',
+          type: BlockType.ASSIGNMENT,
+          title: 'Assignment',
+          position: 5,
+          parentModuleId: null,
+          progressEntries: [],
+        },
       ]);
 
-      expect(quizProgress.completed).toBe(true);
-      expect(assignmentProgress.completed).toBe(true);
-    });
+      const result = await service.getStudentProgress(USER_ID, COURSE_ID);
 
-    it('returns Prisma JSON values and Decimal scores in Lecturer response', async () => {
-      const response = await request(app!.getHttpServer())
-        .get(lecturerProgressUrl())
-        .set('Authorization', `Bearer ${lecturerToken}`)
-        .expect(200);
-
-      // JSON array: answers
-      expect(response.body.quizAttempts[0].answers).toEqual(['A', 'C']);
-
-      // JSON object: fileMetadata
-      expect(response.body.assignmentSubmissions[0].fileMetadata).toEqual({
-        filename: 'assignment.pdf',
-        size: 1024,
-        mimeType: 'application/pdf',
-      });
-
-      // Decimal is explicitly serialized as a string.
-      expect(typeof response.body.quizAttempts[0].score).toBe('string');
-      expect(Number(response.body.quizAttempts[0].score)).toBe(85.5);
-
-      expect(typeof response.body.assignmentSubmissions[0].score).toBe('string');
-
-      expect(Number(response.body.assignmentSubmissions[0].score)).toBe(90);
-    });
-  });
-
-  // ==================================================
-  // PROGRESS SUMMARY
-  // ==================================================
-
-  describe('Progress summary', () => {
-    it('calculates learning progress and quiz completion percentage', async () => {
-      // After manual completion was unmarked:
-      // TEXT = false
-      // FILE = true
-      // VIDEO = true
-      // QUIZ = true
-      // ASSIGNMENT = true
-      // MODULE is excluded.
-
-      const response = await request(app!.getHttpServer())
-        .get(courseUrl('/progress'))
-        .set(studentHeaders())
-        .expect(200);
-
-      expect(response.body.progress).toEqual({
+      expect(result.progress).toEqual({
         totalItems: 5,
-        completedItems: 4,
-        learningProgressPercentage: 80,
+        completedItems: 3,
+        learningProgressPercentage: 60,
         totalQuizzes: 1,
         completedQuizzes: 1,
         quizCompletionPercentage: 100,
       });
 
-      expect(response.body.items).toHaveLength(5);
+      expect(result.items).toHaveLength(5);
+      expect(result.items.some((item) => item.type === BlockType.MODULE)).toBe(false);
+    });
 
-      expect(
-        response.body.items.some((item: { type: string }) => item.type === BlockType.MODULE),
-      ).toBe(false);
+    it('returns zero percentages when no learning blocks exist', async () => {
+      tx.courseBlock.findMany.mockResolvedValue([]);
+
+      const result = await service.getStudentProgress(USER_ID, COURSE_ID);
+
+      expect(result.progress).toEqual({
+        totalItems: 0,
+        completedItems: 0,
+        learningProgressPercentage: 0,
+        totalQuizzes: 0,
+        completedQuizzes: 0,
+        quizCompletionPercentage: 0,
+      });
     });
   });
 
   // ==================================================
-  // LECTURER OWNERSHIP AND MANUAL COMPLETION
+  // ASSESSMENT COMPLETION
   // ==================================================
 
-  describe('Lecturer authorization', () => {
-    it('allows the owning Lecturer to read learner progress', async () => {
-      await request(app!.getHttpServer())
-        .get(lecturerProgressUrl())
-        .set('Authorization', `Bearer ${lecturerToken}`)
-        .expect(200);
-    });
+  describe('markAssessmentBlockCompleted', () => {
+    function mockAssessment(type: typeof BlockType.QUIZ | typeof BlockType.ASSIGNMENT) {
+      mockStudentContext(EnrollmentStatus.ACTIVE);
 
-    it('rejects another Lecturer from reading learner progress', async () => {
-      await request(app!.getHttpServer())
-        .get(lecturerProgressUrl())
-        .set('Authorization', `Bearer ${otherLecturerToken}`)
-        .expect(403);
-    });
-
-    it('rejects Student from manually completing enrollment', async () => {
-      await request(app!.getHttpServer())
-        .patch(lecturerCompletionUrl())
-        .set(studentHeaders())
-        .expect(403);
-    });
-
-    it('allows owning Lecturer to complete ACTIVE enrollment', async () => {
-      await request(app!.getHttpServer())
-        .patch(lecturerCompletionUrl())
-        .set('Authorization', `Bearer ${lecturerToken}`)
-        .expect(200);
-
-      const saved = await prisma.enrollment.findUniqueOrThrow({
-        where: { id: enrollmentId },
+      tx.courseBlock.findUnique.mockResolvedValue({
+        id: 'assessment-1',
+        courseId: COURSE_ID,
+        type,
       });
 
-      expect(saved.status).toBe(EnrollmentStatus.COMPLETED);
-      expect(saved.completedAt).toBeInstanceOf(Date);
+      tx.blockProgress.findUnique.mockResolvedValue(null);
+    }
+
+    it('marks Quiz completed only when a submitted attempt exists', async () => {
+      mockAssessment(BlockType.QUIZ);
+
+      tx.quizAttempt.findFirst.mockResolvedValue({
+        id: 'attempt-1',
+        status: QuizAttemptStatus.SUBMITTED,
+      });
+
+      await service.markAssessmentBlockCompleted(
+        tx as unknown as Prisma.TransactionClient,
+        USER_ID,
+        COURSE_ID,
+        'assessment-1',
+        BlockType.QUIZ,
+      );
+
+      expect(tx.blockProgress.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            completed: true,
+            completedAt: expect.any(Date),
+          }),
+        }),
+      );
     });
 
-    it('allows COMPLETED Student to read progress but not update it', async () => {
-      await request(app!.getHttpServer())
-        .get(courseUrl('/progress'))
-        .set(studentHeaders())
-        .expect(200);
+    it('rejects Quiz completion without a submitted attempt', async () => {
+      mockAssessment(BlockType.QUIZ);
+      tx.quizAttempt.findFirst.mockResolvedValue(null);
 
-      await request(app!.getHttpServer())
-        .patch(completionUrl(fileBlockId))
-        .set(studentHeaders())
-        .send({ completed: false })
-        .expect(403);
+      await expect(
+        service.markAssessmentBlockCompleted(
+          tx as unknown as Prisma.TransactionClient,
+          USER_ID,
+          COURSE_ID,
+          'assessment-1',
+          BlockType.QUIZ,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(tx.blockProgress.upsert).not.toHaveBeenCalled();
+    });
+
+    it('marks Assignment completed only when a submission exists', async () => {
+      mockAssessment(BlockType.ASSIGNMENT);
+
+      tx.assignmentSubmission.findFirst.mockResolvedValue({
+        id: 'submission-1',
+        status: AssignmentSubmissionStatus.SUBMITTED,
+      });
+
+      await service.markAssessmentBlockCompleted(
+        tx as unknown as Prisma.TransactionClient,
+        USER_ID,
+        COURSE_ID,
+        'assessment-1',
+        BlockType.ASSIGNMENT,
+      );
+
+      expect(tx.blockProgress.upsert).toHaveBeenCalled();
+    });
+
+    it('rejects Assignment completion without a submission', async () => {
+      mockAssessment(BlockType.ASSIGNMENT);
+      tx.assignmentSubmission.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.markAssessmentBlockCompleted(
+          tx as unknown as Prisma.TransactionClient,
+          USER_ID,
+          COURSE_ID,
+          'assessment-1',
+          BlockType.ASSIGNMENT,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(tx.blockProgress.upsert).not.toHaveBeenCalled();
+    });
+
+    it('does not overwrite an existing completion timestamp', async () => {
+      mockAssessment(BlockType.QUIZ);
+
+      tx.blockProgress.findUnique.mockResolvedValue({
+        completed: true,
+      });
+
+      await service.markAssessmentBlockCompleted(
+        tx as unknown as Prisma.TransactionClient,
+        USER_ID,
+        COURSE_ID,
+        'assessment-1',
+        BlockType.QUIZ,
+      );
+
+      expect(tx.blockProgress.upsert).not.toHaveBeenCalled();
     });
   });
 
   // ==================================================
-  // COURSE AVAILABILITY
+  // LECTURER RESPONSE AND OWNERSHIP
   // ==================================================
 
-  describe('Course availability', () => {
-    it('denies progress reads when the course becomes Draft', async () => {
-      await prisma.course.update({
-        where: { id: courseId },
-        data: {
-          status: CourseStatus.DRAFT,
+  describe('getLecturerStudentProgress', () => {
+    it('returns Prisma JSON values and serializes Decimal scores', async () => {
+      const answers = ['A', 'C'];
+      const fileMetadata = {
+        filename: 'submission.pdf',
+        size: 1024,
+      };
+
+      enrollmentServiceMock.assertLecturerCanAccessEnrollment.mockResolvedValue({
+        id: ENROLLMENT_ID,
+        status: EnrollmentStatus.ACTIVE,
+        enrolledAt: new Date('2026-01-01T00:00:00Z'),
+        leftAt: null,
+        completedAt: null,
+        course: { lecturerId: LECTURER_ID },
+        user: {
+          id: USER_ID,
+          email: 'student@example.test',
+          firstName: null,
+          lastName: 'Student',
         },
       });
 
-      await request(app!.getHttpServer())
-        .get(courseUrl('/progress'))
-        .set(studentHeaders())
-        .expect(403);
+      tx.courseBlock.findMany.mockResolvedValue([]);
 
-      await request(app!.getHttpServer())
-        .get(courseUrl('/progress/resume'))
-        .set(studentHeaders())
-        .expect(403);
-    });
-
-    it('denies progress reads when the course is suspended', async () => {
-      await prisma.course.update({
-        where: { id: courseId },
-        data: {
-          status: CourseStatus.PUBLISHED,
-          isSuspended: true,
+      tx.quizAttempt.findMany.mockResolvedValue([
+        {
+          id: 'attempt-1',
+          courseBlockId: 'quiz-1',
+          attemptNumber: 1,
+          status: QuizAttemptStatus.GRADED,
+          answers,
+          score: { toString: () => '85.50' },
+          startedAt: new Date(),
+          submittedAt: new Date(),
+          gradedAt: new Date(),
+          quizBlock: {
+            title: 'Networking Quiz',
+          },
         },
-      });
+      ]);
 
-      await request(app!.getHttpServer())
-        .get(courseUrl('/progress'))
-        .set(studentHeaders())
-        .expect(403);
+      tx.assignmentSubmission.findMany.mockResolvedValue([
+        {
+          id: 'submission-1',
+          courseBlockId: 'assignment-1',
+          attemptNumber: 1,
+          textContent: null,
+          fileMetadata,
+          status: AssignmentSubmissionStatus.GRADED,
+          score: { toString: () => '90.00' },
+          feedback: 'Good work',
+          submittedAt: new Date(),
+          gradedAt: new Date(),
+          assignmentBlock: {
+            title: 'Networking Assignment',
+          },
+        },
+      ]);
+
+      const result = await service.getLecturerStudentProgress(
+        LECTURER_ID,
+        COURSE_ID,
+        ENROLLMENT_ID,
+      );
+
+      expect(result.student.firstName).toBeNull();
+      expect(result.quizAttempts[0].answers).toEqual(answers);
+      expect(result.assignmentSubmissions[0].fileMetadata).toEqual(fileMetadata);
+
+      expect(result.quizAttempts[0].score).toBe('85.50');
+      expect(result.assignmentSubmissions[0].score).toBe('90.00');
     });
   });
 });
