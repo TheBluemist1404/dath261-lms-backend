@@ -58,22 +58,22 @@ describe('Course (e2e)', () => {
   // Auth
   // ---------------------------------------------------------------------------
   describe('auth', () => {
-    it('should return 401 on GET /course/get-all without token', async () => {
-      await testApp.http().get('/api/course/get-all').expect(401);
+    it('should return 401 on GET /courses without token', async () => {
+      await testApp.http().get('/api/courses').expect(401);
     });
 
     it('should return 401 on POST /course/create without token', async () => {
-      await testApp.http().post('/api/course/create').send({ title: 'No auth' }).expect(401);
+      await testApp.http().post('/api/courses').send({ title: 'No auth' }).expect(401);
     });
 
     it('should return 403 when a student tries to list own courses (LECTURER only)', async () => {
-      await testApp.http().get('/api/course/get-all').set(student.auth).expect(403);
+      await testApp.http().get('/api/courses').set(student.auth).expect(403);
     });
 
     it('should return 403 when a student tries to create a course', async () => {
       await testApp
         .http()
-        .post('/api/course/create')
+        .post('/api/courses')
         .set(student.auth)
         .send({ title: 'Student course' })
         .expect(403);
@@ -83,11 +83,11 @@ describe('Course (e2e)', () => {
   // ---------------------------------------------------------------------------
   // Create
   // ---------------------------------------------------------------------------
-  describe('POST /api/course/create', () => {
+  describe('POST /api/courses', () => {
     it('should create a course in DRAFT status', async () => {
       const res = await testApp
         .http()
-        .post('/api/course/create')
+        .post('/api/courses')
         .set(lecturerA.auth)
         .send({ title: 'New course' })
         .expect(201);
@@ -101,7 +101,7 @@ describe('Course (e2e)', () => {
     it('should create a course with full optional fields', async () => {
       const res = await testApp
         .http()
-        .post('/api/course/create')
+        .post('/api/courses')
         .set(lecturerA.auth)
         .send({
           title: 'Full',
@@ -118,13 +118,13 @@ describe('Course (e2e)', () => {
     });
 
     it('should reject missing title', async () => {
-      await testApp.http().post('/api/course/create').set(lecturerA.auth).send({}).expect(400);
+      await testApp.http().post('/api/courses').set(lecturerA.auth).send({}).expect(400);
     });
 
     it('should reject invalid enrollment window', async () => {
       await testApp
         .http()
-        .post('/api/course/create')
+        .post('/api/courses')
         .set(lecturerA.auth)
         .send({
           title: 'Invalid',
@@ -143,13 +143,13 @@ describe('Course (e2e)', () => {
   // ---------------------------------------------------------------------------
   // Read — get-all (lecturer scope)
   // ---------------------------------------------------------------------------
-  describe('GET /api/course/get-all', () => {
+  describe('GET /api/courses', () => {
     it('should return only courses owned by the current lecturer', async () => {
       await createCourse({ lecturerId: lecturerA.id, title: 'A1' });
       await createCourse({ lecturerId: lecturerA.id, title: 'A2' });
       await createCourse({ lecturerId: lecturerB.id, title: 'B1' });
 
-      const res = await testApp.http().get('/api/course/get-all').set(lecturerA.auth).expect(200);
+      const res = await testApp.http().get('/api/courses').set(lecturerA.auth).expect(200);
 
       expect(res.body).toHaveLength(2);
       const titles = res.body.map((c: { title: string }) => c.title).sort();
@@ -160,7 +160,7 @@ describe('Course (e2e)', () => {
   // ---------------------------------------------------------------------------
   // Read — get-all/published
   // ---------------------------------------------------------------------------
-  describe('GET /api/course/get-all/published', () => {
+  describe('GET /api/courses/catalog', () => {
     it('should only return PUBLISHED and non-suspended courses', async () => {
       await createCourse({
         lecturerId: lecturerA.id,
@@ -181,7 +181,7 @@ describe('Course (e2e)', () => {
 
       const res = await testApp
         .http()
-        .get('/api/course/get-all/published')
+        .get('/api/courses/catalog')
         .set(student.auth)
         .expect(200);
 
@@ -202,7 +202,7 @@ describe('Course (e2e)', () => {
 
       const res = await testApp
         .http()
-        .get(`/api/course/get/${course.id}`)
+        .get(`/api/courses/${course.id}`)
         .set(lecturerA.auth)
         .expect(200);
 
@@ -217,7 +217,7 @@ describe('Course (e2e)', () => {
 
       const res = await testApp
         .http()
-        .get(`/api/course/get/${course.id}`)
+        .get(`/api/courses/${course.id}`)
         .set(student.auth)
         .expect(200);
 
@@ -230,7 +230,7 @@ describe('Course (e2e)', () => {
         status: CourseStatus.DRAFT,
       });
 
-      await testApp.http().get(`/api/course/get/${course.id}`).set(student.auth).expect(403);
+      await testApp.http().get(`/api/courses/${course.id}`).set(student.auth).expect(403);
     });
 
     it('should return 403 when non-owner reads a suspended course', async () => {
@@ -240,24 +240,24 @@ describe('Course (e2e)', () => {
         isSuspended: true,
       });
 
-      await testApp.http().get(`/api/course/get/${course.id}`).set(lecturerB.auth).expect(403);
+      await testApp.http().get(`/api/courses/${course.id}`).set(lecturerB.auth).expect(403);
     });
 
     it('should return 404 when course does not exist', async () => {
-      await testApp.http().get('/api/course/get/non-existent').set(lecturerA.auth).expect(404);
+      await testApp.http().get('/api/courses/non-existent').set(lecturerA.auth).expect(404);
     });
   });
 
   // ---------------------------------------------------------------------------
   // Update
   // ---------------------------------------------------------------------------
-  describe('PATCH /api/course/update/:courseId', () => {
+  describe('PATCH /api/courses/:courseId', () => {
     it('should update course title and persist change', async () => {
       const course = await createCourse({ lecturerId: lecturerA.id, title: 'Old' });
 
       const res = await testApp
         .http()
-        .patch(`/api/course/update/${course.id}`)
+        .patch(`/api/courses/${course.id}`)
         .set(lecturerA.auth)
         .send({ title: 'New' })
         .expect(200);
@@ -275,7 +275,7 @@ describe('Course (e2e)', () => {
 
       await testApp
         .http()
-        .patch(`/api/course/update/${course.id}`)
+        .patch(`/api/courses/${course.id}`)
         .set(lecturerB.auth)
         .send({ title: 'Hacked' })
         .expect(403);
@@ -295,7 +295,7 @@ describe('Course (e2e)', () => {
 
       await testApp
         .http()
-        .patch(`/api/course/update/${course.id}`)
+        .patch(`/api/courses/${course.id}`)
         .set(lecturerA.auth)
         .send({ enrollmentEndAt: '2025-12-31T00:00:00.000Z' })
         .expect(400);
@@ -310,7 +310,7 @@ describe('Course (e2e)', () => {
 
       const res = await testApp
         .http()
-        .patch(`/api/course/update/${course.id}`)
+        .patch(`/api/courses/${course.id}`)
         .set(lecturerA.auth)
         .send({ enrollmentEndAt: null })
         .expect(200);
@@ -321,7 +321,7 @@ describe('Course (e2e)', () => {
     it('should return 404 when course does not exist', async () => {
       await testApp
         .http()
-        .patch('/api/course/update/non-existent')
+        .patch('/api/courses/non-existent')
         .set(lecturerA.auth)
         .send({ title: 'New' })
         .expect(404);
@@ -331,7 +331,7 @@ describe('Course (e2e)', () => {
   // ---------------------------------------------------------------------------
   // Update status
   // ---------------------------------------------------------------------------
-  describe('PATCH /api/course/update-status/:courseId', () => {
+  describe('PATCH /api/courses/:courseId/status', () => {
     it('should publish a course that has at least one block', async () => {
       const course = await createCourse({
         lecturerId: lecturerA.id,
@@ -348,7 +348,7 @@ describe('Course (e2e)', () => {
 
       const res = await testApp
         .http()
-        .patch(`/api/course/update-status/${course.id}`)
+        .patch(`/api/courses/${course.id}/status`)
         .set(lecturerA.auth)
         .send({ status: CourseStatus.PUBLISHED })
         .expect(200);
@@ -364,7 +364,7 @@ describe('Course (e2e)', () => {
 
       await testApp
         .http()
-        .patch(`/api/course/update-status/${course.id}`)
+        .patch(`/api/courses/${course.id}/status`)
         .set(lecturerA.auth)
         .send({ status: CourseStatus.PUBLISHED })
         .expect(400);
@@ -391,7 +391,7 @@ describe('Course (e2e)', () => {
 
       await testApp
         .http()
-        .patch(`/api/course/update-status/${course.id}`)
+        .patch(`/api/courses/${course.id}/status`)
         .set(lecturerB.auth)
         .send({ status: CourseStatus.PUBLISHED })
         .expect(403);
@@ -405,7 +405,7 @@ describe('Course (e2e)', () => {
 
       const res = await testApp
         .http()
-        .patch(`/api/course/update-status/${course.id}`)
+        .patch(`/api/courses/${course.id}/status`)
         .set(lecturerA.auth)
         .send({ status: CourseStatus.DRAFT })
         .expect(200);
@@ -416,7 +416,7 @@ describe('Course (e2e)', () => {
     it('should return 404 when course does not exist', async () => {
       await testApp
         .http()
-        .patch('/api/course/update-status/non-existent')
+        .patch('/api/courses/non-existent/status')
         .set(lecturerA.auth)
         .send({ status: CourseStatus.PUBLISHED })
         .expect(404);
@@ -436,7 +436,7 @@ describe('Course (e2e)', () => {
 
       const res = await testApp
         .http()
-        .get('/api/course/get-all/published')
+        .get('/api/courses/catalog')
         .set(student.auth)
         .expect(200);
 
@@ -449,7 +449,7 @@ describe('Course (e2e)', () => {
         status: CourseStatus.DRAFT,
       });
 
-      await testApp.http().get(`/api/course/get/${course.id}`).set(student.auth).expect(403);
+      await testApp.http().get(`/api/courses/${course.id}`).set(student.auth).expect(403);
     });
   });
 });
