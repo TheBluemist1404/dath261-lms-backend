@@ -11,6 +11,7 @@ import { CollaborationModule } from './modules/collaboration/collaboration.modul
 import { DiscussionModule } from './modules/discussion/discussion.module.js';
 import { EnrollmentModule } from './modules/enrollments/enrollment.module.js';
 import { PagesModule } from './modules/pages/pages.module.js';
+import { ProgressModule } from './modules/progress/progress.module.js';
 import { ReferencesModule } from './modules/references/references.module.js';
 import { SearchModule } from './modules/search/search.module.js';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
@@ -34,6 +35,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
     ReferencesModule,
     SearchModule,
     EnrollmentModule,
+    ProgressModule,
   ],
   providers: [
     {

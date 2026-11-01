@@ -1,5 +1,5 @@
+import { ForbiddenException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { EnrollmentStatus, UserRole } from '../../../generated/prisma/client.js';
 import { EnrollmentController } from './../enrollment.controller.js';
 import { EnrollmentService } from './../enrollment.service.js';
@@ -12,6 +12,7 @@ const serviceMock = {
   leave: vi.fn(),
   getMyEnrollments: vi.fn(),
   getCourseEnrollmentState: vi.fn(),
+  completeEnrollment: vi.fn(),
 };
 
 describe('EnrollmentController', () => {
@@ -118,5 +119,61 @@ describe('EnrollmentController', () => {
     expect(serviceMock.getCourseEnrollmentState).toHaveBeenCalledWith(USER_ID, COURSE_ID);
 
     expect(result).toEqual(state);
+  });
+
+  describe('completeEnrollment', () => {
+    const lecturerId = 'lecturer-1';
+    const courseId = 'course-1';
+    const enrollmentId = 'enrollment-1';
+
+    it('passes the authenticated Lecturer ID and route parameters to EnrollmentService', async () => {
+      const request = {
+        user: {
+          userId: lecturerId,
+          role: UserRole.LECTURER,
+        },
+      };
+
+      const params = {
+        courseId,
+        enrollmentId,
+      };
+
+      const expectedResponse = {
+        enrollmentId,
+        status: EnrollmentStatus.COMPLETED,
+        completedAt: new Date(),
+      };
+
+      serviceMock.completeEnrollment.mockResolvedValue(expectedResponse);
+
+      const result = await controller.completeEnrollment(
+        { courseId, enrollmentId },
+        request as never,
+      );
+
+      expect(serviceMock.completeEnrollment).toHaveBeenCalledWith(
+        lecturerId,
+        courseId,
+        enrollmentId,
+      );
+
+      expect(result).toEqual(expectedResponse);
+    });
+
+    it('propagates errors from EnrollmentService', async () => {
+      serviceMock.completeEnrollment.mockRejectedValue(
+        new ForbiddenException('You do not own this course.'),
+      );
+
+      await expect(
+        controller.completeEnrollment({ courseId, enrollmentId }, {
+          user: {
+            userId: lecturerId,
+            role: UserRole.LECTURER,
+          },
+        } as never),
+      ).rejects.toThrow(ForbiddenException);
+    });
   });
 });

@@ -11,3 +11,11 @@ export class CourseIdParamDto {
   @MaxLength(100)
   courseId!: string;
 }
+
+export class CourseEnrollmentParamsDto extends CourseIdParamDto {
+  @ApiProperty({ example: 'enrollment-123' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  enrollmentId!: string;
+}
