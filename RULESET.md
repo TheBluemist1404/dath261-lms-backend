@@ -1,6 +1,6 @@
-# DATH 261 Backend Rules
+# Nodus Backend Rules
 
-These rules define the engineering boundaries for the Learner-Oriented LMS backend.
+These rules define the engineering boundaries for the Nodus backend.
 
 ## 1. Notion Is the Product Source of Truth
 
