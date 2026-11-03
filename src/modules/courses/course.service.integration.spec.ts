@@ -411,27 +411,23 @@ describe('CourseService - integration', () => {
       expect(result.id).toBe(course.id);
     });
 
-    it('should throw ForbiddenException when non-owner reads a DRAFT course', async () => {
+    it('should throw NotFoundException when non-owner reads a DRAFT course', async () => {
       const course = await createCourse({
         lecturerId: lecturerA.id,
         status: CourseStatus.DRAFT,
       });
 
-      await expect(service.findOne(course.id, lecturerB.id)).rejects.toThrow(
-        'You do not have access to this course.',
-      );
+      await expect(service.findOne(course.id, lecturerB.id)).rejects.toThrow('Course not found.');
     });
 
-    it('should throw ForbiddenException when non-owner reads a suspended course', async () => {
+    it('should throw NotFoundException when non-owner reads a suspended course', async () => {
       const course = await createCourse({
         lecturerId: lecturerA.id,
         status: CourseStatus.PUBLISHED,
         isSuspended: true,
       });
 
-      await expect(service.findOne(course.id, lecturerB.id)).rejects.toThrow(
-        'You do not have access to this course.',
-      );
+      await expect(service.findOne(course.id, lecturerB.id)).rejects.toThrow('Course not found.');
     });
 
     it('should allow owner to read a suspended course', async () => {
