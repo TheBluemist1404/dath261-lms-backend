@@ -226,7 +226,7 @@ describe('CourseBlock (e2e)', () => {
       const b = await createBlock({ position: 1, title: 'B' });
       const c = await createBlock({ position: 2, title: 'C' });
 
-      /*await testApp
+      await testApp
         .http()
         .patch(`/api/courses/${courseAId}/blocks/reorder`)
         .set(lecturerA.auth)
@@ -237,16 +237,7 @@ describe('CourseBlock (e2e)', () => {
         where: { courseId: courseAId, parentModuleId: null },
         orderBy: { position: 'asc' },
       });
-      expect(persisted.map((p) => p.title)).toEqual(['C', 'B', 'A']);*/
-
-      const res = await testApp
-      .http()
-      .patch(`/api/courses/${courseAId}/blocks/reorder`)
-      .set(lecturerA.auth)
-      .send({ blockIds: [c.id, b.id, a.id] });
-
-    console.log('>>> STATUS:', res.status);
-    console.log('>>> BODY:', JSON.stringify(res.body, null, 2));
+      expect(persisted.map((p) => p.title)).toEqual(['C', 'B', 'A']);
     });
 
     it('should reject duplicate ids', async () => {

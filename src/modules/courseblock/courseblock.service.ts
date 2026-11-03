@@ -184,7 +184,7 @@ export class CourseBlockService {
     const siblings = await this.prisma.courseBlock.findMany({
       where: {
         courseId,
-        parentModuleId: { equals: parentModuleId },
+        parentModuleId: parentModuleId,
       },
       select: {
         id: true,
