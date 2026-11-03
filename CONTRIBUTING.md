@@ -1,10 +1,10 @@
 # Contributing
 
-This repository contains the NestJS backend for the DATN 261 Learner-Oriented LMS.
+This repository contains the NestJS backend for Nodus, the learner-oriented LMS built for DATH 261.
 
 ## Source of Truth
 
-Product requirements, use cases, domain models, authorization rules, data modelling, and system architecture are maintained in the DATN 261 Notion workspace.
+Product requirements, use cases, domain models, authorization rules, data modelling, and system architecture are maintained in the DATH 261 Notion workspace.
 
 Do not invent persistent entities, API behavior, permissions, or lifecycle rules only in code. If implementation exposes a missing decision, refine the relevant Notion model first and reference that decision from the issue/PR.
 

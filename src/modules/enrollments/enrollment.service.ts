@@ -8,6 +8,8 @@ import { CourseStatus, EnrollmentStatus, Prisma } from '../../generated/prisma/c
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { MyEnrollmentsQueryDto } from './dto/my-enrollments-query.dto.js';
 import { MyEnrollmentState } from './enums/my-enrollment-state.enum.js';
+
+type EnrollmentAccessClient = Pick<Prisma.TransactionClient, 'course' | 'enrollment'>;
 @Injectable()
 export class EnrollmentService {
   constructor(private readonly prisma: PrismaService) {}
@@ -276,7 +278,6 @@ export class EnrollmentService {
         };
 
       default:
-        // My Courses excludes LEFT enrollments by default.
         return {
           userId,
           status: {
@@ -298,7 +299,6 @@ export class EnrollmentService {
       return courseAvailable ? MyEnrollmentState.IN_PROGRESS : MyEnrollmentState.UNAVAILABLE;
     }
 
-    // LEFT should have been excluded by the database query.
     throw new Error(`Unexpected enrollment status in My Courses: ${status}`);
   }
 
@@ -306,8 +306,12 @@ export class EnrollmentService {
    * Get the current student's enrollment and access state.
    * Returns null enrollment fields if they have never enrolled.
    */
-  async getCourseEnrollmentState(userId: string, courseId: string) {
-    const course = await this.prisma.course.findUnique({
+  async getCourseEnrollmentState(
+    userId: string,
+    courseId: string,
+    db: EnrollmentAccessClient = this.prisma,
+  ) {
+    const course = await db.course.findUnique({
       where: { id: courseId },
       select: {
         id: true,
@@ -320,7 +324,7 @@ export class EnrollmentService {
       throw new NotFoundException('Course not found.');
     }
 
-    const enrollment = await this.prisma.enrollment.findUnique({
+    const enrollment = await db.enrollment.findUnique({
       where: {
         userId_courseId: {
           userId,
@@ -357,12 +361,21 @@ export class EnrollmentService {
    * Call this before returning protected course content or
    * resolving a course resource reference for a student.
    */
-  async assertCanAccessCourse(userId: string, courseId: string): Promise<void> {
-    const state = await this.getCourseEnrollmentState(userId, courseId);
+  async assertCanAccessCourse(
+    userId: string,
+    courseId: string,
+    db: EnrollmentAccessClient = this.prisma,
+  ) {
+    const state = await this.getCourseEnrollmentState(userId, courseId, db);
 
-    if (!state.canAccessCourse) {
+    if (!state.canAccessCourse || state.enrollmentId === null || state.enrollmentStatus === null) {
       throw new ForbiddenException('You do not have access to this course.');
     }
+
+    return {
+      id: state.enrollmentId,
+      status: state.enrollmentStatus,
+    };
   }
 
   /**
@@ -397,6 +410,82 @@ export class EnrollmentService {
    */
   private isCourseAvailable(course: { status: CourseStatus; isSuspended: boolean }): boolean {
     return course.status === CourseStatus.PUBLISHED && !course.isSuspended;
+  }
+
+  async assertLecturerCanAccessEnrollment(
+    tx: Prisma.TransactionClient,
+    lecturerId: string,
+    courseId: string,
+    enrollmentId: string,
+  ) {
+    const enrollment = await tx.enrollment.findUnique({
+      where: { id: enrollmentId },
+      include: {
+        course: { select: { lecturerId: true } },
+        user: {
+          select: { id: true, email: true, firstName: true, lastName: true },
+        },
+      },
+    });
+
+    if (!enrollment || enrollment.courseId !== courseId) {
+      throw new NotFoundException('Enrollment not found in this course.');
+    }
+
+    if (enrollment.course.lecturerId !== lecturerId) {
+      throw new ForbiddenException('You do not own this course.');
+    }
+
+    return enrollment;
+  }
+
+  async completeEnrollment(lecturerId: string, courseId: string, enrollmentId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const enrollment = await tx.enrollment.findUnique({
+        where: { id: enrollmentId },
+        select: {
+          id: true,
+          courseId: true,
+          status: true,
+          course: { select: { lecturerId: true } },
+        },
+      });
+
+      if (!enrollment || enrollment.courseId !== courseId) {
+        throw new NotFoundException('Enrollment not found in this course.');
+      }
+
+      if (enrollment.course.lecturerId !== lecturerId) {
+        throw new ForbiddenException('You do not own this course.');
+      }
+
+      if (enrollment.status !== EnrollmentStatus.ACTIVE) {
+        throw new ConflictException('Only ACTIVE enrollments can be completed.');
+      }
+
+      const now = new Date();
+      const result = await tx.enrollment.updateMany({
+        where: {
+          id: enrollmentId,
+          courseId,
+          status: EnrollmentStatus.ACTIVE,
+        },
+        data: {
+          status: EnrollmentStatus.COMPLETED,
+          completedAt: now,
+        },
+      });
+
+      if (result.count !== 1) {
+        throw new ConflictException('The enrollment state changed. Please retry.');
+      }
+
+      return {
+        enrollmentId,
+        status: EnrollmentStatus.COMPLETED,
+        completedAt: now,
+      };
+    });
   }
 
   /**

@@ -4,7 +4,7 @@ This is an agent/team handoff, updated on 2026-10-06. Notion owns the product an
 
 ## Project and repositories
 
-Nodus is the DATH 261 Learner-Oriented LMS: course discovery and learning combined with contextual notes and collaborative knowledge workspaces. Older sources use Learner LMS or DATN; these refer to the same project. Commercial marketplace features are outside the MVP.
+Nodus is the learner-oriented LMS built for DATH 261: course discovery and learning combined with contextual notes and collaborative knowledge workspaces. Older sources use Learner LMS or DATN; these refer to the same project. Commercial marketplace features are outside the MVP.
 
 - [Frontend](https://github.com/TheBluemist1404/dath261-lms-frontend): React web client.
 - [Backend](https://github.com/TheBluemist1404/dath261-lms-backend): NestJS API and planned collaboration infrastructure.
