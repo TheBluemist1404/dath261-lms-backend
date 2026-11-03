@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -27,10 +28,13 @@ import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js
 import { Roles } from '../authorization/roles.decorator.js';
 import { RolesGuard } from '../authorization/roles.guard.js';
 import { CourseService } from './course.service.js';
+import { CourseQueryDto } from './dto/course-query.dto.js';
 import { CourseResponseDto } from './dto/course-response.dto.js';
 import { CreateCourseDto } from './dto/create-course.dto.js';
+import { PaginatedCourseResponseDto } from './dto/paginated-course-response.dto.js';
 import { UpdateCourseDto } from './dto/update-course.dto.js';
 import { UpdateCourseStatusDto } from './dto/update-course-status.dto.js';
+import { UserRole } from '../../generated/prisma/enums.js';
 
 @ApiTags('Courses')
 @ApiBearerAuth('access-token')
@@ -40,7 +44,7 @@ export class CourseController {
 
   @Get()
   @UseGuards(RolesGuard)
-  @Roles('LECTURER')
+  @Roles(UserRole.LECTURER)
   @ApiOperation({ summary: 'Get all courses owned by the current lecturer' })
   @ApiOkResponse({
     description: 'List of courses retrieved successfully.',
@@ -53,14 +57,21 @@ export class CourseController {
   }
 
   @Get('catalog')
-  @ApiOperation({ summary: 'Get all published and non-suspended courses' })
+  @ApiOperation({
+    summary: 'Get all published and non-suspended courses',
+    description:
+      'Supports search (title/description/prerequisites), filtering (lecturerId, enrollmentOpen), sorting, and pagination.',
+  })
   @ApiOkResponse({
-    description: 'List of published courses retrieved successfully.',
-    type: [CourseResponseDto],
+    description: 'Paginated list of published courses retrieved successfully.',
+    type: PaginatedCourseResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid query parameters (e.g. unknown sortBy value).',
   })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token.' })
-  findAllPublished() {
-    return this.courseService.findAllPublished();
+  findAllPublished(@Query() query: CourseQueryDto) {
+    return this.courseService.findAllPublished(query);
   }
 
   @Get(':courseId')
@@ -84,7 +95,7 @@ export class CourseController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(RolesGuard)
-  @Roles('LECTURER')
+  @Roles(UserRole.LECTURER)
   @ApiOperation({
     summary: 'Create a new course',
     description: 'Creates a new course in DRAFT status owned by the current lecturer.',
@@ -104,7 +115,7 @@ export class CourseController {
 
   @Patch(':courseId')
   @UseGuards(RolesGuard)
-  @Roles('LECTURER')
+  @Roles(UserRole.LECTURER)
   @ApiOperation({ summary: 'Update a specific course' })
   @ApiParam({ name: 'courseId', description: 'The ID of the course', example: 'clx123abc' })
   @ApiOkResponse({
@@ -127,7 +138,7 @@ export class CourseController {
 
   @Patch(':courseId/status')
   @UseGuards(RolesGuard)
-  @Roles('LECTURER')
+  @Roles(UserRole.LECTURER)
   @ApiOperation({
     summary: 'Update the publication status of a specific course',
     description:

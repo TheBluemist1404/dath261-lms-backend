@@ -5,16 +5,30 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CourseStatus } from '../../generated/prisma/enums.js';
+import { CourseStatus, EnrollmentStatus } from '../../generated/prisma/enums.js';
+import type { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { CourseQueryDto } from './dto/course-query.dto.js';
 import { CourseResponseDto } from './dto/course-response.dto.js';
 import { CreateCourseDto } from './dto/create-course.dto.js';
+import { PaginatedCourseResponseDto } from './dto/paginated-course-response.dto.js';
 import { UpdateCourseDto } from './dto/update-course.dto.js';
 import { UpdateCourseStatusDto } from './dto/update-course-status.dto.js';
+
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
 
 @Injectable()
 export class CourseService {
   constructor(private readonly prisma: PrismaService) {}
+
+  // ---------------------------------------------------------------------------
+  // Shared include
+  // ---------------------------------------------------------------------------
+
+  private readonly lecturerInclude = {
+    lecturer: { select: { id: true, firstName: true, lastName: true } },
+  } satisfies Prisma.CourseInclude;
 
   // ---------------------------------------------------------------------------
   // Queries
@@ -24,26 +38,60 @@ export class CourseService {
     const courses = await this.prisma.course.findMany({
       where: { lecturerId },
       orderBy: { createdAt: 'desc' },
+      include: {
+        ...this.lecturerInclude,
+        _count: {
+          select: {
+            enrollments: { where: { status: EnrollmentStatus.ACTIVE } },
+          },
+        },
+      },
     });
-
-    return courses.map((course) => this.toResponseDto(course));
+    return courses.map((course) =>
+      this.toResponseDto(course, { enrollmentCount: course._count.enrollments }),
+    );
   }
 
-  async findAllPublished(): Promise<CourseResponseDto[]> {
-    const courses = await this.prisma.course.findMany({
-      where: {
-        status: CourseStatus.PUBLISHED,
-        isSuspended: false,
+  async findAllPublished(query: CourseQueryDto): Promise<PaginatedCourseResponseDto> {
+    const page = query.page ?? DEFAULT_PAGE;
+    const limit = query.limit ?? DEFAULT_LIMIT;
+    const skip = (page - 1) * limit;
+  
+    const where = this.buildCatalogWhere(query);
+    const orderBy = {
+      [query.sortBy ?? 'createdAt']: query.sortOrder ?? 'desc',
+    } as Prisma.CourseOrderByWithRelationInput;
+  
+    const [total, courses] = await this.prisma.$transaction([
+      this.prisma.course.count({ where }),
+      this.prisma.course.findMany({
+        where,
+        orderBy,
+        skip,
+        take: limit,
+        include: this.lecturerInclude,
+      }),
+    ]);
+  
+    const totalPages = Math.ceil(total / limit) || 0;
+  
+    return {
+      data: courses.map((course) => this.toResponseDto(course)),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
       },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    return courses.map((course) => this.toResponseDto(course));
+    };
   }
 
   async findOne(courseId: string, requesterId: string): Promise<CourseResponseDto> {
     const course = await this.prisma.course.findUnique({
       where: { id: courseId },
+      include: this.lecturerInclude,
     });
 
     if (!course) {
@@ -80,6 +128,7 @@ export class CourseService {
         status: CourseStatus.DRAFT,
         isSuspended: false,
       },
+      include: this.lecturerInclude,
     });
 
     return this.toResponseDto(course);
@@ -122,6 +171,7 @@ export class CourseService {
           enrollmentEndAt: dto.enrollmentEndAt ? new Date(dto.enrollmentEndAt) : null,
         }),
       },
+      include: this.lecturerInclude,
     });
 
     return this.toResponseDto(updated);
@@ -147,6 +197,7 @@ export class CourseService {
     const updated = await this.prisma.course.update({
       where: { id: courseId },
       data: { status: dto.status },
+      include: this.lecturerInclude,
     });
 
     return this.toResponseDto(updated);
@@ -155,6 +206,37 @@ export class CourseService {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  private buildCatalogWhere(query: CourseQueryDto): Prisma.CourseWhereInput {
+    const where: Prisma.CourseWhereInput = {
+      status: CourseStatus.PUBLISHED,
+      isSuspended: false,
+    };
+
+    if (query.lecturerId) {
+      where.lecturerId = query.lecturerId;
+    }
+
+    const search = query.search?.trim();
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { prerequisites: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    if (query.enrollmentOpen === 'true') {
+      const now = new Date();
+      // A null boundary is treated as open-ended.
+      where.AND = [
+        { OR: [{ enrollmentStartAt: null }, { enrollmentStartAt: { lte: now } }] },
+        { OR: [{ enrollmentEndAt: null }, { enrollmentEndAt: { gte: now } }] },
+      ];
+    }
+
+    return where;
+  }
 
   private async assertOwnership(courseId: string, lecturerId: string) {
     const course = await this.prisma.course.findUnique({
@@ -189,18 +271,27 @@ export class CourseService {
   }
 
   private toResponseDto(course: {
-    id: string;
-    title: string;
-    description: string | null;
-    prerequisites: string | null;
-    status: CourseStatus;
-    isSuspended: boolean;
-    lecturerId: string;
-    enrollmentStartAt: Date | null;
-    enrollmentEndAt: Date | null;
-    createdAt: Date;
-    updatedAt: Date;
-  }): CourseResponseDto {
+      id: string;
+      title: string;
+      description: string | null;
+      prerequisites: string | null;
+      status: CourseStatus;
+      isSuspended: boolean;
+      lecturerId: string;
+      enrollmentStartAt: Date | null;
+      enrollmentEndAt: Date | null;
+      createdAt: Date;
+      updatedAt: Date;
+      lecturer: { id: string; firstName: string | null; lastName: string | null };
+    },
+    extra?: { enrollmentCount?: number },
+  ): CourseResponseDto {
+    const name =
+      [course.lecturer.firstName, course.lecturer.lastName]
+        .filter((part): part is string => Boolean(part))
+        .join(' ')
+        .trim() || 'Unknown';
+
     return {
       id: course.id,
       title: course.title,
@@ -209,6 +300,8 @@ export class CourseService {
       status: course.status,
       isSuspended: course.isSuspended,
       lecturerId: course.lecturerId,
+      lecturer: { id: course.lecturer.id, name },
+      ...(extra?.enrollmentCount !== undefined && { enrollmentCount: extra.enrollmentCount }),
       enrollmentStartAt: course.enrollmentStartAt,
       enrollmentEndAt: course.enrollmentEndAt,
       createdAt: course.createdAt,
