@@ -1,8 +1,8 @@
-# Learner-Oriented LMS — Backend
+# Nodus — Backend
 
 [![CI](https://github.com/TheBluemist1404/dath261-lms-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/TheBluemist1404/dath261-lms-backend/actions/workflows/ci.yml)
 
-NestJS backend for the **DATH 261 Learner-Oriented Learning Management System**.
+NestJS backend for **Nodus**, the learner-oriented learning management system built for DATH 261.
 
 The system combines conventional LMS workflows with a student-owned knowledge workspace, permission-aware references to canonical course material, assessment/progress workflows, and real-time collaborative study spaces.
 

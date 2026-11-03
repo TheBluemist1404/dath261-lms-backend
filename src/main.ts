@@ -22,8 +22,8 @@ async function bootstrap() {
 
   if (configService.get<boolean>('SWAGGER_ENABLED') ?? false) {
     const swaggerConfig = new DocumentBuilder()
-      .setTitle('DATN 261 Learner-Oriented LMS API')
-      .setDescription('REST API for the DATN 261 Learner-Oriented Learning Management System.')
+      .setTitle('Nodus API')
+      .setDescription('REST API for Nodus, the learner-oriented learning management system.')
       .setVersion('1.0')
       .addBearerAuth()
       .build();

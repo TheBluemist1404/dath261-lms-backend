@@ -2,7 +2,7 @@
   "name": "dath261-lms-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "NestJS backend for the DATH 261 Learner-Oriented LMS.",
+  "description": "NestJS backend for Nodus, the learner-oriented LMS built for DATH 261.",
   "license": "UNLICENSED",
   "type": "module",
   "packageManager": "pnpm@12.4.2",
