@@ -14,14 +14,6 @@ async function bootstrap() {
 
   configureApp(app);
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true, //Bỏ các field ko được khai báo trong DTO
-      forbidNonWhitelisted: true,
-      transform: true, //chuyển dữ liêu đầu vào phù hợp khi tạo DTO
-    }),
-  );
-
   const corsOrigin = configService.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';
 
   app.enableCors({
