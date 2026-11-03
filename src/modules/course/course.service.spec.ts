@@ -6,6 +6,7 @@ import { vi } from 'vitest';
 import { CourseStatus } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { CourseService } from './course.service.js';
+import type { CourseQueryDto } from './dto/course-query.dto.js';
 import type { CreateCourseDto } from './dto/create-course.dto.js';
 import type { UpdateCourseDto } from './dto/update-course.dto.js';
 import type { UpdateCourseStatusDto } from './dto/update-course-status.dto.js';
@@ -13,6 +14,13 @@ import type { UpdateCourseStatusDto } from './dto/update-course-status.dto.js';
 // ---------------------------------------------------------------------------
 // Helper dùng chung
 // ---------------------------------------------------------------------------
+const buildLecturer = (overrides: Partial<Record<string, unknown>> = {}) => ({
+  id: 'lecturer-1',
+  firstName: 'Nguyen',
+  lastName: 'An',
+  ...overrides,
+});
+
 const buildCourse = (overrides: Partial<Record<string, unknown>> = {}) => ({
   id: 'course-1',
   title: 'Course title',
@@ -25,9 +33,19 @@ const buildCourse = (overrides: Partial<Record<string, unknown>> = {}) => ({
   enrollmentEndAt: null,
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  lecturer: buildLecturer(),
+  _count: { enrollments: 0 },
   ...overrides,
 });
 
+// Include object mà service dùng — phải khớp chính xác để assertion pass.
+const lecturerInclude = {
+  lecturer: { select: { id: true, firstName: true, lastName: true } },
+};
+
+// ---------------------------------------------------------------------------
+// findAllByLecturer
+// ---------------------------------------------------------------------------
 describe('CourseService - findAllByLecturer', () => {
   let service: CourseService;
 
@@ -48,10 +66,10 @@ describe('CourseService - findAllByLecturer', () => {
     vi.clearAllMocks();
   });
 
-  it('should query courses by lecturerId and map to DTO', async () => {
+  it('should query courses by lecturerId with lecturer include and active enrollment count', async () => {
     const courses = [
-      buildCourse({ id: 'course-1' }),
-      buildCourse({ id: 'course-2', title: 'Another' }),
+      buildCourse({ id: 'course-1', _count: { enrollments: 3 } }),
+      buildCourse({ id: 'course-2', title: 'Another', _count: { enrollments: 0 } }),
     ];
     mockPrisma.course.findMany.mockResolvedValue(courses);
 
@@ -60,9 +78,24 @@ describe('CourseService - findAllByLecturer', () => {
     expect(mockPrisma.course.findMany).toHaveBeenCalledWith({
       where: { lecturerId },
       orderBy: { createdAt: 'desc' },
+      include: {
+        ...lecturerInclude,
+        _count: {
+          select: {
+            enrollments: { where: { status: 'ACTIVE' } },
+          },
+        },
+      },
     });
     expect(result).toHaveLength(2);
-    expect(result[0]).toEqual(expect.objectContaining({ id: 'course-1' }));
+    expect(result[0]).toEqual(
+      expect.objectContaining({
+        id: 'course-1',
+        lecturer: { id: 'lecturer-1', name: 'Nguyen An' },
+        enrollmentCount: 3,
+      }),
+    );
+    expect(result[1].enrollmentCount).toBe(0);
   });
 
   it('should return empty array when lecturer has no courses', async () => {
@@ -72,15 +105,32 @@ describe('CourseService - findAllByLecturer', () => {
 
     expect(result).toEqual([]);
   });
+
+  it('should fall back to "Unknown" when lecturer name is missing', async () => {
+    mockPrisma.course.findMany.mockResolvedValue([
+      buildCourse({
+        lecturer: { id: 'lecturer-1', firstName: null, lastName: null },
+      }),
+    ]);
+
+    const result = await service.findAllByLecturer(lecturerId);
+
+    expect(result[0].lecturer.name).toBe('Unknown');
+  });
 });
 
+// ---------------------------------------------------------------------------
+// findAllPublished
+// ---------------------------------------------------------------------------
 describe('CourseService - findAllPublished', () => {
   let service: CourseService;
 
   const mockPrisma = {
     course: {
       findMany: vi.fn(),
+      count: vi.fn(),
     },
+    $transaction: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -90,24 +140,157 @@ describe('CourseService - findAllPublished', () => {
 
     service = module.get<CourseService>(CourseService);
     vi.clearAllMocks();
+
+    // Default: $transaction([countPromise, findManyPromise]) → resolve to [total, rows]
+    // We wire it so tests only need to mock count & findMany.
+    mockPrisma.$transaction.mockImplementation(async (ops: Promise<unknown>[]) =>
+      Promise.all(ops),
+    );
   });
 
-  it('should only query PUBLISHED and non-suspended courses', async () => {
-    mockPrisma.course.findMany.mockResolvedValue([buildCourse({ status: CourseStatus.PUBLISHED })]);
+  const buildQuery = (overrides: Partial<CourseQueryDto> = {}): CourseQueryDto =>
+    ({ ...overrides }) as CourseQueryDto;
 
-    const result = await service.findAllPublished();
+  it('should query PUBLISHED non-suspended with default pagination/sort and return meta', async () => {
+    mockPrisma.course.count.mockResolvedValue(1);
+    mockPrisma.course.findMany.mockResolvedValue([
+      buildCourse({ status: CourseStatus.PUBLISHED }),
+    ]);
 
+    const result = await service.findAllPublished(buildQuery());
+
+    expect(mockPrisma.course.count).toHaveBeenCalledWith({
+      where: {
+        status: CourseStatus.PUBLISHED,
+        isSuspended: false,
+      },
+    });
     expect(mockPrisma.course.findMany).toHaveBeenCalledWith({
       where: {
         status: CourseStatus.PUBLISHED,
         isSuspended: false,
       },
       orderBy: { createdAt: 'desc' },
+      skip: 0,
+      take: 20,
+      include: lecturerInclude,
     });
-    expect(result).toHaveLength(1);
+    expect(result.data).toHaveLength(1);
+    expect(result.meta).toEqual({
+      total: 1,
+      page: 1,
+      limit: 20,
+      totalPages: 1,
+      hasNextPage: false,
+      hasPrevPage: false,
+    });
+  });
+
+  it('should apply search across title/description/prerequisites', async () => {
+    mockPrisma.course.count.mockResolvedValue(0);
+    mockPrisma.course.findMany.mockResolvedValue([]);
+
+    await service.findAllPublished(buildQuery({ search: '  nestjs  ' }));
+
+    const where = mockPrisma.course.findMany.mock.calls[0][0].where;
+    expect(where.OR).toEqual([
+      { title: { contains: 'nestjs', mode: 'insensitive' } },
+      { description: { contains: 'nestjs', mode: 'insensitive' } },
+      { prerequisites: { contains: 'nestjs', mode: 'insensitive' } },
+    ]);
+  });
+
+  it('should ignore empty/whitespace search', async () => {
+    mockPrisma.course.count.mockResolvedValue(0);
+    mockPrisma.course.findMany.mockResolvedValue([]);
+
+    await service.findAllPublished(buildQuery({ search: '   ' }));
+
+    const where = mockPrisma.course.findMany.mock.calls[0][0].where;
+    expect(where.OR).toBeUndefined();
+  });
+
+  it('should filter by lecturerId', async () => {
+    mockPrisma.course.count.mockResolvedValue(0);
+    mockPrisma.course.findMany.mockResolvedValue([]);
+
+    await service.findAllPublished(buildQuery({ lecturerId: 'lecturer-9' }));
+
+    const where = mockPrisma.course.findMany.mock.calls[0][0].where;
+    expect(where.lecturerId).toBe('lecturer-9');
+  });
+
+  it('should filter by enrollmentOpen=true (null boundaries = open-ended)', async () => {
+    mockPrisma.course.count.mockResolvedValue(0);
+    mockPrisma.course.findMany.mockResolvedValue([]);
+
+    await service.findAllPublished(buildQuery({ enrollmentOpen: 'true' }));
+
+    const where = mockPrisma.course.findMany.mock.calls[0][0].where;
+    expect(where.AND).toHaveLength(2);
+    expect(where.AND[0]).toEqual({
+      OR: [{ enrollmentStartAt: null }, { enrollmentStartAt: { lte: expect.any(Date) } }],
+    });
+    expect(where.AND[1]).toEqual({
+      OR: [{ enrollmentEndAt: null }, { enrollmentEndAt: { gte: expect.any(Date) } }],
+    });
+  });
+
+  it('should not add enrollmentOpen filter when false', async () => {
+    mockPrisma.course.count.mockResolvedValue(0);
+    mockPrisma.course.findMany.mockResolvedValue([]);
+
+    await service.findAllPublished(buildQuery({ enrollmentOpen: 'false' }));
+
+    const where = mockPrisma.course.findMany.mock.calls[0][0].where;
+    expect(where.AND).toBeUndefined();
+  });
+
+  it('should apply custom sort and pagination', async () => {
+    mockPrisma.course.count.mockResolvedValue(42);
+    mockPrisma.course.findMany.mockResolvedValue([]);
+
+    const result = await service.findAllPublished(
+      buildQuery({ sortBy: 'title', sortOrder: 'asc', page: 3, limit: 10 }),
+    );
+
+    expect(mockPrisma.course.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: { title: 'asc' },
+        skip: 20,
+        take: 10,
+      }),
+    );
+    expect(result.meta).toEqual({
+      total: 42,
+      page: 3,
+      limit: 10,
+      totalPages: 5,
+      hasNextPage: true,
+      hasPrevPage: true,
+    });
+  });
+
+  it('should return totalPages=0 and no next/prev when result is empty', async () => {
+    mockPrisma.course.count.mockResolvedValue(0);
+    mockPrisma.course.findMany.mockResolvedValue([]);
+
+    const result = await service.findAllPublished(buildQuery());
+
+    expect(result.meta).toEqual({
+      total: 0,
+      page: 1,
+      limit: 20,
+      totalPages: 0,
+      hasNextPage: false,
+      hasPrevPage: false,
+    });
   });
 });
 
+// ---------------------------------------------------------------------------
+// findOne
+// ---------------------------------------------------------------------------
 describe('CourseService - findOne', () => {
   let service: CourseService;
 
@@ -130,6 +313,17 @@ describe('CourseService - findOne', () => {
     vi.clearAllMocks();
   });
 
+  it('should include lecturer relation', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue(buildCourse());
+
+    await service.findOne(courseId, ownerId);
+
+    expect(mockPrisma.course.findUnique).toHaveBeenCalledWith({
+      where: { id: courseId },
+      include: lecturerInclude,
+    });
+  });
+
   it('should throw NotFoundException when course does not exist', async () => {
     mockPrisma.course.findUnique.mockResolvedValue(null);
 
@@ -138,12 +332,15 @@ describe('CourseService - findOne', () => {
     );
   });
 
-  it('should allow owner to read DRAFT course', async () => {
+  it('should allow owner to read DRAFT course and expose lecturer summary', async () => {
     mockPrisma.course.findUnique.mockResolvedValue(buildCourse({ status: CourseStatus.DRAFT }));
 
     const result = await service.findOne(courseId, ownerId);
 
     expect(result.id).toBe(courseId);
+    expect(result.lecturer).toEqual({ id: 'lecturer-1', name: 'Nguyen An' });
+    // findOne không trả enrollmentCount
+    expect(result.enrollmentCount).toBeUndefined();
   });
 
   it('should allow non-owner to read PUBLISHED non-suspended course', async () => {
@@ -171,6 +368,9 @@ describe('CourseService - findOne', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// create
+// ---------------------------------------------------------------------------
 describe('CourseService - create', () => {
   let service: CourseService;
 
@@ -194,7 +394,7 @@ describe('CourseService - create', () => {
   const buildDto = (overrides: Partial<CreateCourseDto> = {}): CreateCourseDto =>
     ({ title: 'New course', ...overrides }) as CreateCourseDto;
 
-  it('should create course in DRAFT status with null optional fields', async () => {
+  it('should create course in DRAFT status with null optional fields and lecturer include', async () => {
     const dto = buildDto();
     mockPrisma.course.create.mockResolvedValue(buildCourse());
 
@@ -211,6 +411,7 @@ describe('CourseService - create', () => {
         status: CourseStatus.DRAFT,
         isSuspended: false,
       },
+      include: lecturerInclude,
     });
   });
 
@@ -228,7 +429,16 @@ describe('CourseService - create', () => {
         enrollmentStartAt: new Date('2026-01-01T00:00:00.000Z'),
         enrollmentEndAt: new Date('2026-02-01T00:00:00.000Z'),
       }),
+      include: lecturerInclude,
     });
+  });
+
+  it('should return DTO with lecturer summary', async () => {
+    mockPrisma.course.create.mockResolvedValue(buildCourse());
+
+    const result = await service.create(lecturerId, buildDto());
+
+    expect(result.lecturer).toEqual({ id: 'lecturer-1', name: 'Nguyen An' });
   });
 
   it('should throw BadRequestException when start >= end', async () => {
@@ -244,6 +454,9 @@ describe('CourseService - create', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// update
+// ---------------------------------------------------------------------------
 describe('CourseService - update', () => {
   let service: CourseService;
 
@@ -289,7 +502,7 @@ describe('CourseService - update', () => {
     expect(mockPrisma.course.update).not.toHaveBeenCalled();
   });
 
-  it('should only update provided fields', async () => {
+  it('should only update provided fields with lecturer include', async () => {
     mockPrisma.course.update.mockResolvedValue(buildCourse());
 
     await service.update(courseId, lecturerId, buildDto({ title: 'New' }));
@@ -297,6 +510,7 @@ describe('CourseService - update', () => {
     expect(mockPrisma.course.update).toHaveBeenCalledWith({
       where: { id: courseId },
       data: { title: 'New' },
+      include: lecturerInclude,
     });
   });
 
@@ -308,6 +522,7 @@ describe('CourseService - update', () => {
     expect(mockPrisma.course.update).toHaveBeenCalledWith({
       where: { id: courseId },
       data: { enrollmentEndAt: null },
+      include: lecturerInclude,
     });
   });
 
@@ -321,7 +536,6 @@ describe('CourseService - update', () => {
   });
 
   it('should throw BadRequestException when merged window is invalid', async () => {
-    // DB: start = Jan 1, end = Feb 1. DTO changes end to Dec 31 (before start).
     mockPrisma.course.findUnique.mockResolvedValue(
       buildCourse({
         lecturerId,
@@ -339,6 +553,9 @@ describe('CourseService - update', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// updateStatus
+// ---------------------------------------------------------------------------
 describe('CourseService - updateStatus', () => {
   let service: CourseService;
 
@@ -399,6 +616,7 @@ describe('CourseService - updateStatus', () => {
     expect(mockPrisma.course.update).toHaveBeenCalledWith({
       where: { id: courseId },
       data: { status: CourseStatus.PUBLISHED },
+      include: lecturerInclude,
     });
     expect(result.status).toBe(CourseStatus.PUBLISHED);
   });
@@ -421,6 +639,7 @@ describe('CourseService - updateStatus', () => {
     expect(mockPrisma.course.update).toHaveBeenCalledWith({
       where: { id: courseId },
       data: { status: CourseStatus.DRAFT },
+      include: lecturerInclude,
     });
   });
 });

@@ -2,9 +2,15 @@
 import { ConfigModule } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { BlockType, CourseStatus, UserRole } from '../../generated/prisma/enums.js';
+import {
+  BlockType,
+  CourseStatus,
+  EnrollmentStatus,
+  UserRole,
+} from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { CourseService } from './course.service.js';
+import type { CourseQueryDto } from './dto/course-query.dto.js';
 
 const PREFIX = 'course-integration-';
 
@@ -40,6 +46,10 @@ describe('CourseService - integration', () => {
   });
 
   async function cleanup() {
+    // Order matters: delete children before parents (FK constraints).
+    await prisma.enrollment.deleteMany({
+      where: { course: { lecturer: { email: { startsWith: PREFIX } } } },
+    });
     await prisma.courseBlock.deleteMany({
       where: { course: { lecturer: { email: { startsWith: PREFIX } } } },
     });
@@ -58,6 +68,8 @@ describe('CourseService - integration', () => {
       data: {
         email: `${PREFIX}lecturer-a@example.com`,
         passwordHash: 'hash',
+        firstName: 'Nguyen',
+        lastName: 'An',
         role: UserRole.LECTURER,
       },
     });
@@ -65,15 +77,18 @@ describe('CourseService - integration', () => {
       data: {
         email: `${PREFIX}lecturer-b@example.com`,
         passwordHash: 'hash',
+        firstName: 'Tran',
+        lastName: 'Binh',
         role: UserRole.LECTURER,
       },
     });
   });
 
-  // Helper tạo course trực tiếp qua Prisma để kiểm soát status/suspended/createdAt.
   function createCourse(overrides: {
     lecturerId: string;
     title?: string;
+    description?: string | null;
+    prerequisites?: string | null;
     status?: CourseStatus;
     isSuspended?: boolean;
     enrollmentStartAt?: Date | null;
@@ -84,6 +99,8 @@ describe('CourseService - integration', () => {
       data: {
         title: overrides.title ?? 'Course',
         lecturerId: overrides.lecturerId,
+        ...(overrides.description !== undefined && { description: overrides.description }),
+        ...(overrides.prerequisites !== undefined && { prerequisites: overrides.prerequisites }),
         ...(overrides.status !== undefined && { status: overrides.status }),
         ...(overrides.isSuspended !== undefined && { isSuspended: overrides.isSuspended }),
         ...(overrides.enrollmentStartAt !== undefined && {
@@ -97,11 +114,28 @@ describe('CourseService - integration', () => {
     });
   }
 
+  async function createStudentEnrollment(
+    courseId: string,
+    status: EnrollmentStatus,
+    emailSuffix: string,
+  ) {
+    const student = await prisma.user.create({
+      data: {
+        email: `${PREFIX}student-${emailSuffix}@example.com`,
+        passwordHash: 'hash',
+        role: UserRole.STUDENT,
+      },
+    });
+    return prisma.enrollment.create({
+      data: { userId: student.id, courseId, status },
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // findAllByLecturer
   // ---------------------------------------------------------------------------
   describe('findAllByLecturer', () => {
-    it('should return only courses owned by the lecturer, newest first', async () => {
+    it('should return only courses owned by the lecturer, newest first, with lecturer summary', async () => {
       await createCourse({
         lecturerId: lecturerA.id,
         title: 'A-old',
@@ -122,6 +156,24 @@ describe('CourseService - integration', () => {
       const result = await service.findAllByLecturer(lecturerA.id);
 
       expect(result.map((c) => c.title)).toEqual(['A-new', 'A-mid', 'A-old']);
+      expect(result[0].lecturer).toEqual({ id: lecturerA.id, name: 'Nguyen An' });
+    });
+
+    it('should return only ACTIVE enrollment count per course', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'Counting',
+      });
+
+      await createStudentEnrollment(course.id, EnrollmentStatus.ACTIVE, 'a1');
+      await createStudentEnrollment(course.id, EnrollmentStatus.ACTIVE, 'a2');
+      await createStudentEnrollment(course.id, EnrollmentStatus.LEFT, 'l1');
+      await createStudentEnrollment(course.id, EnrollmentStatus.COMPLETED, 'c1');
+
+      const result = await service.findAllByLecturer(lecturerA.id);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].enrollmentCount).toBe(2);
     });
 
     it('should return empty array when lecturer has no courses', async () => {
@@ -135,7 +187,10 @@ describe('CourseService - integration', () => {
   // findAllPublished
   // ---------------------------------------------------------------------------
   describe('findAllPublished', () => {
-    it('should return only PUBLISHED and non-suspended courses', async () => {
+    const q = (overrides: Partial<CourseQueryDto> = {}): CourseQueryDto =>
+      ({ ...overrides }) as CourseQueryDto;
+
+    it('should return only PUBLISHED and non-suspended courses with meta', async () => {
       await createCourse({
         lecturerId: lecturerA.id,
         title: 'draft',
@@ -153,9 +208,12 @@ describe('CourseService - integration', () => {
         isSuspended: true,
       });
 
-      const result = await service.findAllPublished();
+      const result = await service.findAllPublished(q());
 
-      expect(result.map((c) => c.title)).toEqual(['published']);
+      expect(result.data.map((c) => c.title)).toEqual(['published']);
+      expect(result.meta.total).toBe(1);
+      expect(result.meta.page).toBe(1);
+      expect(result.meta.limit).toBe(20);
     });
 
     it('should not leak courses from other lecturers that are not published', async () => {
@@ -165,9 +223,157 @@ describe('CourseService - integration', () => {
         status: CourseStatus.DRAFT,
       });
 
-      const result = await service.findAllPublished();
+      const result = await service.findAllPublished(q());
 
-      expect(result).toEqual([]);
+      expect(result.data).toEqual([]);
+      expect(result.meta.total).toBe(0);
+    });
+
+    it('should search by title, description, and prerequisites (case-insensitive)', async () => {
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'NestJS Fundamentals',
+        status: CourseStatus.PUBLISHED,
+      });
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'React Basics',
+        description: 'Learn nestjs patterns',
+        status: CourseStatus.PUBLISHED,
+      });
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'Advanced TS',
+        prerequisites: 'Know NestJS first',
+        status: CourseStatus.PUBLISHED,
+      });
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'Unrelated',
+        status: CourseStatus.PUBLISHED,
+      });
+
+      const result = await service.findAllPublished(q({ search: 'NESTJS' }));
+
+      expect(result.data.map((c) => c.title).sort()).toEqual([
+        'Advanced TS',
+        'NestJS Fundamentals',
+        'React Basics',
+      ]);
+      expect(result.meta.total).toBe(3);
+    });
+
+    it('should filter by lecturerId', async () => {
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'by-A',
+        status: CourseStatus.PUBLISHED,
+      });
+      await createCourse({
+        lecturerId: lecturerB.id,
+        title: 'by-B',
+        status: CourseStatus.PUBLISHED,
+      });
+
+      const result = await service.findAllPublished(q({ lecturerId: lecturerB.id }));
+
+      expect(result.data.map((c) => c.title)).toEqual(['by-B']);
+    });
+
+    it('should filter by enrollmentOpen=true', async () => {
+      const now = new Date();
+      const past = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const future = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'open-both-null',
+        status: CourseStatus.PUBLISHED,
+      });
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'open-within',
+        status: CourseStatus.PUBLISHED,
+        enrollmentStartAt: past,
+        enrollmentEndAt: future,
+      });
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'closed-future',
+        status: CourseStatus.PUBLISHED,
+        enrollmentStartAt: future,
+        enrollmentEndAt: future,
+      });
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'closed-past',
+        status: CourseStatus.PUBLISHED,
+        enrollmentStartAt: past,
+        enrollmentEndAt: past,
+      });
+
+      const result = await service.findAllPublished(q({ enrollmentOpen: 'true' }));
+
+      expect(result.data.map((c) => c.title).sort()).toEqual([
+        'open-both-null',
+        'open-within',
+      ]);
+    });
+
+    it('should sort by title ascending', async () => {
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'Zeta',
+        status: CourseStatus.PUBLISHED,
+      });
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'Alpha',
+        status: CourseStatus.PUBLISHED,
+      });
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'Mike',
+        status: CourseStatus.PUBLISHED,
+      });
+
+      const result = await service.findAllPublished(
+        q({ sortBy: 'title', sortOrder: 'asc' }),
+      );
+
+      expect(result.data.map((c) => c.title)).toEqual(['Alpha', 'Mike', 'Zeta']);
+    });
+
+    it('should paginate results', async () => {
+      for (let i = 0; i < 5; i++) {
+        await createCourse({
+          lecturerId: lecturerA.id,
+          title: `c-${i}`,
+          status: CourseStatus.PUBLISHED,
+          createdAt: new Date(`2026-01-0${i + 1}T00:00:00.000Z`),
+        });
+      }
+
+      const page1 = await service.findAllPublished(q({ page: 1, limit: 2 }));
+      const page2 = await service.findAllPublished(q({ page: 2, limit: 2 }));
+      const page3 = await service.findAllPublished(q({ page: 3, limit: 2 }));
+
+      expect(page1.data.map((c) => c.title)).toEqual(['c-4', 'c-3']);
+      expect(page1.meta).toMatchObject({
+        total: 5,
+        page: 1,
+        limit: 2,
+        totalPages: 3,
+        hasNextPage: true,
+        hasPrevPage: false,
+      });
+
+      expect(page2.data.map((c) => c.title)).toEqual(['c-2', 'c-1']);
+      expect(page2.meta.hasPrevPage).toBe(true);
+      expect(page2.meta.hasNextPage).toBe(true);
+
+      expect(page3.data.map((c) => c.title)).toEqual(['c-0']);
+      expect(page3.meta.hasNextPage).toBe(false);
     });
   });
 
@@ -175,7 +381,7 @@ describe('CourseService - integration', () => {
   // findOne
   // ---------------------------------------------------------------------------
   describe('findOne', () => {
-    it('should allow owner to read a DRAFT course', async () => {
+    it('should allow owner to read a DRAFT course with lecturer summary', async () => {
       const course = await createCourse({
         lecturerId: lecturerA.id,
         status: CourseStatus.DRAFT,
@@ -184,6 +390,7 @@ describe('CourseService - integration', () => {
       const result = await service.findOne(course.id, lecturerA.id);
 
       expect(result.id).toBe(course.id);
+      expect(result.lecturer).toEqual({ id: lecturerA.id, name: 'Nguyen An' });
     });
 
     it('should allow non-owner to read a PUBLISHED non-suspended course', async () => {
@@ -249,6 +456,7 @@ describe('CourseService - integration', () => {
       expect(created.status).toBe(CourseStatus.DRAFT);
       expect(created.isSuspended).toBe(false);
       expect(created.lecturerId).toBe(lecturerA.id);
+      expect(created.lecturer).toEqual({ id: lecturerA.id, name: 'Nguyen An' });
 
       const persisted = await prisma.course.findUniqueOrThrow({ where: { id: created.id } });
       expect(persisted.description).toBeNull();
@@ -302,6 +510,7 @@ describe('CourseService - integration', () => {
       });
 
       expect(updated.title).toBe('New');
+      expect(updated.lecturer).toEqual({ id: lecturerA.id, name: 'Nguyen An' });
 
       const persisted = await prisma.course.findUniqueOrThrow({ where: { id: course.id } });
       expect(persisted.title).toBe('New');
@@ -397,6 +606,7 @@ describe('CourseService - integration', () => {
       });
 
       expect(updated.status).toBe(CourseStatus.PUBLISHED);
+      expect(updated.lecturer).toEqual({ id: lecturerA.id, name: 'Nguyen An' });
 
       const persisted = await prisma.course.findUniqueOrThrow({ where: { id: course.id } });
       expect(persisted.status).toBe(CourseStatus.PUBLISHED);
