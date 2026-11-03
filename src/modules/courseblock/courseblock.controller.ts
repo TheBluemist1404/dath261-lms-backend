@@ -144,5 +144,4 @@ export class CourseBlockController {
   ) {
     return this.courseBlockSerivice.remove(courseId, blockId, req.user.userId);
   }
-
 }

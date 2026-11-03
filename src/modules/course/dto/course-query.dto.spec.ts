@@ -67,40 +67,35 @@ describe('CourseQueryDto validation', () => {
     expect(dto.enrollmentOpen).toBe(value);
   });
 
-  it.each(['TRUE', 'False', 'yes', '1', '0', '', 'maybe'])(
-    'rejects enrollmentOpen=%j',
-    async (value) => {
-      await expect(transform({ enrollmentOpen: value })).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
-    },
-  );
+  it.each([
+    'TRUE',
+    'False',
+    'yes',
+    '1',
+    '0',
+    '',
+    'maybe',
+  ])('rejects enrollmentOpen=%j', async (value) => {
+    await expect(transform({ enrollmentOpen: value })).rejects.toBeInstanceOf(BadRequestException);
+  });
 
   it('rejects boolean true for enrollmentOpen (must be string)', async () => {
     // class-validator @IsIn(['true','false']) compares against strings; a real
     // boolean is not equal to 'true' string, so it must be rejected.
-    await expect(transform({ enrollmentOpen: true })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(transform({ enrollmentOpen: true })).rejects.toBeInstanceOf(BadRequestException);
   });
 
   // -------------------------------------------------------------------------
   // sortBy
   // -------------------------------------------------------------------------
-  it.each(['createdAt', 'title', 'enrollmentStartAt'])(
-    'accepts sortBy=%s',
-    async (value) => {
-      const dto = await transform({ sortBy: value });
-      expect(dto.sortBy).toBe(value);
-    },
-  );
+  it.each(['createdAt', 'title', 'enrollmentStartAt'])('accepts sortBy=%s', async (value) => {
+    const dto = await transform({ sortBy: value });
+    expect(dto.sortBy).toBe(value);
+  });
 
-  it.each(['createdat', 'TITLE', 'description', 'id', ''])(
-    'rejects sortBy=%j',
-    async (value) => {
-      await expect(transform({ sortBy: value })).rejects.toBeInstanceOf(BadRequestException);
-    },
-  );
+  it.each(['createdat', 'TITLE', 'description', 'id', ''])('rejects sortBy=%j', async (value) => {
+    await expect(transform({ sortBy: value })).rejects.toBeInstanceOf(BadRequestException);
+  });
 
   // -------------------------------------------------------------------------
   // sortOrder
@@ -209,14 +204,12 @@ describe('CourseQueryDto validation', () => {
   });
 
   it('rejects unknown extra query fields (forbidNonWhitelisted)', async () => {
-    await expect(transform({ hacker: 'injected' })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(transform({ hacker: 'injected' })).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('rejects unknown field even when valid fields are present', async () => {
-    await expect(
-      transform({ search: 'nestjs', hacker: 'injected' }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(transform({ search: 'nestjs', hacker: 'injected' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 });

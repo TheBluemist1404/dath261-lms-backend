@@ -236,7 +236,7 @@ describe('Course references API (e2e)', () => {
       const reference = await addReference(video.id, 30);
 
       await http()
-        .patch(`/api/courseblock/update/${course.id}/${video.id}`)
+        .patch(`/api/courses/${course.id}/blocks/${video.id}`)
         .set(lecturer.auth)
         .send({ type: 'TEXT' })
         .expect(200);
@@ -255,7 +255,7 @@ describe('Course references API (e2e)', () => {
       await addReference(video.id, 30);
 
       await http()
-        .patch(`/api/courseblock/update/${course.id}/${video.id}`)
+        .patch(`/api/courses/${course.id}/blocks/${video.id}`)
         .set(lecturer.auth)
         .send({ type: 'FILE' })
         .expect(200);
@@ -270,7 +270,7 @@ describe('Course references API (e2e)', () => {
       await addReference(video.id, 300);
 
       await http()
-        .patch(`/api/courseblock/update/${course.id}/${video.id}`)
+        .patch(`/api/courses/${course.id}/blocks/${video.id}`)
         .set(lecturer.auth)
         .send({ content: { durationSeconds: 120 } })
         .expect(200);
@@ -283,7 +283,7 @@ describe('Course references API (e2e)', () => {
       });
 
       await http()
-        .patch(`/api/courseblock/update/${course.id}/${video.id}`)
+        .patch(`/api/courses/${course.id}/blocks/${video.id}`)
         .set(lecturer.auth)
         .send({ content: { durationSeconds: 300 } })
         .expect(200);

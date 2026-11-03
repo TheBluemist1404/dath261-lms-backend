@@ -143,9 +143,7 @@ describe('CourseService - findAllPublished', () => {
 
     // Default: $transaction([countPromise, findManyPromise]) → resolve to [total, rows]
     // We wire it so tests only need to mock count & findMany.
-    mockPrisma.$transaction.mockImplementation(async (ops: Promise<unknown>[]) =>
-      Promise.all(ops),
-    );
+    mockPrisma.$transaction.mockImplementation(async (ops: Promise<unknown>[]) => Promise.all(ops));
   });
 
   const buildQuery = (overrides: Partial<CourseQueryDto> = {}): CourseQueryDto =>
@@ -153,9 +151,7 @@ describe('CourseService - findAllPublished', () => {
 
   it('should query PUBLISHED non-suspended with default pagination/sort and return meta', async () => {
     mockPrisma.course.count.mockResolvedValue(1);
-    mockPrisma.course.findMany.mockResolvedValue([
-      buildCourse({ status: CourseStatus.PUBLISHED }),
-    ]);
+    mockPrisma.course.findMany.mockResolvedValue([buildCourse({ status: CourseStatus.PUBLISHED })]);
 
     const result = await service.findAllPublished(buildQuery());
 

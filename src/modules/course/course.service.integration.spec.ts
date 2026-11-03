@@ -314,10 +314,7 @@ describe('CourseService - integration', () => {
 
       const result = await service.findAllPublished(q({ enrollmentOpen: 'true' }));
 
-      expect(result.data.map((c) => c.title).sort()).toEqual([
-        'open-both-null',
-        'open-within',
-      ]);
+      expect(result.data.map((c) => c.title).sort()).toEqual(['open-both-null', 'open-within']);
     });
 
     it('should sort by title ascending', async () => {
@@ -337,9 +334,7 @@ describe('CourseService - integration', () => {
         status: CourseStatus.PUBLISHED,
       });
 
-      const result = await service.findAllPublished(
-        q({ sortBy: 'title', sortOrder: 'asc' }),
-      );
+      const result = await service.findAllPublished(q({ sortBy: 'title', sortOrder: 'asc' }));
 
       expect(result.data.map((c) => c.title)).toEqual(['Alpha', 'Mike', 'Zeta']);
     });

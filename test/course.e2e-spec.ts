@@ -231,11 +231,7 @@ describe('Course (e2e)', () => {
         isSuspended: true,
       });
 
-      const res = await testApp
-        .http()
-        .get('/api/courses/catalog')
-        .set(student.auth)
-        .expect(200);
+      const res = await testApp.http().get('/api/courses/catalog').set(student.auth).expect(200);
 
       expect(res.body.data).toHaveLength(1);
       expect(res.body.data[0].title).toBe('published');
@@ -714,11 +710,7 @@ describe('Course (e2e)', () => {
         status: CourseStatus.DRAFT,
       });
 
-      const res = await testApp
-        .http()
-        .get('/api/courses/catalog')
-        .set(student.auth)
-        .expect(200);
+      const res = await testApp.http().get('/api/courses/catalog').set(student.auth).expect(200);
 
       expect(res.body.data).toEqual([]);
       expect(res.body.meta.total).toBe(0);

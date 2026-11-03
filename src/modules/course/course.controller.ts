@@ -24,6 +24,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { UserRole } from '../../generated/prisma/enums.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { Roles } from '../authorization/roles.decorator.js';
 import { RolesGuard } from '../authorization/roles.guard.js';
@@ -34,7 +35,6 @@ import { CreateCourseDto } from './dto/create-course.dto.js';
 import { PaginatedCourseResponseDto } from './dto/paginated-course-response.dto.js';
 import { UpdateCourseDto } from './dto/update-course.dto.js';
 import { UpdateCourseStatusDto } from './dto/update-course-status.dto.js';
-import { UserRole } from '../../generated/prisma/enums.js';
 
 @ApiTags('Courses')
 @ApiBearerAuth('access-token')

@@ -5,8 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CourseStatus, EnrollmentStatus } from '../../generated/prisma/enums.js';
 import type { Prisma } from '../../generated/prisma/client.js';
+import { CourseStatus, EnrollmentStatus } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { CourseQueryDto } from './dto/course-query.dto.js';
 import { CourseResponseDto } from './dto/course-response.dto.js';
@@ -56,12 +56,12 @@ export class CourseService {
     const page = query.page ?? DEFAULT_PAGE;
     const limit = query.limit ?? DEFAULT_LIMIT;
     const skip = (page - 1) * limit;
-  
+
     const where = this.buildCatalogWhere(query);
     const orderBy = {
       [query.sortBy ?? 'createdAt']: query.sortOrder ?? 'desc',
     } as Prisma.CourseOrderByWithRelationInput;
-  
+
     const [total, courses] = await this.prisma.$transaction([
       this.prisma.course.count({ where }),
       this.prisma.course.findMany({
@@ -72,9 +72,9 @@ export class CourseService {
         include: this.lecturerInclude,
       }),
     ]);
-  
+
     const totalPages = Math.ceil(total / limit) || 0;
-  
+
     return {
       data: courses.map((course) => this.toResponseDto(course)),
       meta: {
@@ -270,7 +270,8 @@ export class CourseService {
     }
   }
 
-  private toResponseDto(course: {
+  private toResponseDto(
+    course: {
       id: string;
       title: string;
       description: string | null;

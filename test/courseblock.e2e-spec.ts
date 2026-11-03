@@ -58,11 +58,7 @@ describe('CourseBlock (e2e)', () => {
     });
 
     it('should return 403 when lecturer does not own the course', async () => {
-      await testApp
-        .http()
-        .get(`/api/courses/${courseAId}/blocks`)
-        .set(lecturerB.auth)
-        .expect(403);
+      await testApp.http().get(`/api/courses/${courseAId}/blocks`).set(lecturerB.auth).expect(403);
     });
   });
 
