@@ -5,8 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BlockType } from '../generated/prisma/enums.js';
-import { PrismaService } from '../infrastructure/database/prisma/prisma.service.js';
+import { BlockType } from '../../generated/prisma/enums.js';
+import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
 import { UpdateCourseBlockDto } from './dto/update-course-block.dto.js';
 
@@ -184,7 +184,7 @@ export class CourseBlockService {
     const siblings = await this.prisma.courseBlock.findMany({
       where: {
         courseId,
-        parentModuleId,
+        parentModuleId: parentModuleId,
       },
       select: {
         id: true,

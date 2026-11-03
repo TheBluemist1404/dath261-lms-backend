@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { PrismaModule } from '../infrastructure/database/prisma/prisma.module.js';
-import { CourseBlockController } from './courseblock.controller.js';
-import { CourseBlockService } from './courseblock.service.js';
+import { PrismaModule } from '../../infrastructure/database/prisma/prisma.module.js';
+import { CourseBlockController } from './course-block.controller.js';
+import { CourseBlockService } from './course-block.service.js';
 
 @Module({
   imports: [PrismaModule],

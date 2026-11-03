@@ -3,9 +3,9 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { vi } from 'vitest';
-import { BlockType } from '../generated/prisma/enums.js';
-import { PrismaService } from '../infrastructure/database/prisma/prisma.service.js';
-import { CourseBlockService } from './courseblock.service.js';
+import { BlockType } from '../../generated/prisma/enums.js';
+import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { CourseBlockService } from './course-block.service.js';
 import type { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
 import type { UpdateCourseBlockDto } from './dto/update-course-block.dto.js';
 

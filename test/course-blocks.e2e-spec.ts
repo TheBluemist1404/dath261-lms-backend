@@ -54,26 +54,22 @@ describe('CourseBlock (e2e)', () => {
   // ---------------------------------------------------------------------------
   describe('auth', () => {
     it('should return 401 when no token is provided', async () => {
-      await testApp.http().get(`/api/courseblock/get-all/${courseAId}`).expect(401);
+      await testApp.http().get(`/api/courses/${courseAId}/blocks`).expect(401);
     });
 
     it('should return 403 when lecturer does not own the course', async () => {
-      await testApp
-        .http()
-        .get(`/api/courseblock/get-all/${courseAId}`)
-        .set(lecturerB.auth)
-        .expect(403);
+      await testApp.http().get(`/api/courses/${courseAId}/blocks`).set(lecturerB.auth).expect(403);
     });
   });
 
   // ---------------------------------------------------------------------------
   // Create
   // ---------------------------------------------------------------------------
-  describe('POST /courseblock/create/:courseId', () => {
+  describe('POST /api/courses/:courseId/blocks', () => {
     it('should create a block with auto position 0', async () => {
       const res = await testApp
         .http()
-        .post(`/api/courseblock/create/${courseAId}`)
+        .post(`/api/courses/${courseAId}/blocks`)
         .set(lecturerA.auth)
         .send({ type: BlockType.TEXT, title: 'First' })
         .expect(201);
@@ -85,14 +81,14 @@ describe('CourseBlock (e2e)', () => {
     it('should auto-increment position for the second root block', async () => {
       await testApp
         .http()
-        .post(`/api/courseblock/create/${courseAId}`)
+        .post(`/api/courses/${courseAId}/blocks`)
         .set(lecturerA.auth)
         .send({ type: BlockType.TEXT, title: 'First' })
         .expect(201);
 
       const res = await testApp
         .http()
-        .post(`/api/courseblock/create/${courseAId}`)
+        .post(`/api/courses/${courseAId}/blocks`)
         .set(lecturerA.auth)
         .send({ type: BlockType.TEXT, title: 'Second' })
         .expect(201);
@@ -105,7 +101,7 @@ describe('CourseBlock (e2e)', () => {
 
       const res = await testApp
         .http()
-        .post(`/api/courseblock/create/${courseAId}`)
+        .post(`/api/courses/${courseAId}/blocks`)
         .set(lecturerA.auth)
         .send({
           type: BlockType.TEXT,
@@ -123,7 +119,7 @@ describe('CourseBlock (e2e)', () => {
 
       await testApp
         .http()
-        .post(`/api/courseblock/create/${courseAId}`)
+        .post(`/api/courses/${courseAId}/blocks`)
         .set(lecturerA.auth)
         .send({
           type: BlockType.TEXT,
@@ -137,7 +133,7 @@ describe('CourseBlock (e2e)', () => {
   // ---------------------------------------------------------------------------
   // Read
   // ---------------------------------------------------------------------------
-  describe('GET /courseblock/get-all/:courseId', () => {
+  describe('GET /api/courses/:courseId/blocks', () => {
     it('should return blocks ordered by position', async () => {
       await createBlock({ position: 2, title: 'C' });
       await createBlock({ position: 0, title: 'A' });
@@ -145,7 +141,7 @@ describe('CourseBlock (e2e)', () => {
 
       const res = await testApp
         .http()
-        .get(`/api/courseblock/get-all/${courseAId}`)
+        .get(`/api/courses/${courseAId}/blocks`)
         .set(lecturerA.auth)
         .expect(200);
 
@@ -157,13 +153,13 @@ describe('CourseBlock (e2e)', () => {
   // ---------------------------------------------------------------------------
   // Update
   // ---------------------------------------------------------------------------
-  describe('PATCH /courseblock/update/:courseId/:blockId', () => {
+  describe('PATCH /api/courses/:courseId/blocks/:blockId', () => {
     it('should update block title', async () => {
       const block = await createBlock({ position: 0, title: 'Old' });
 
       const res = await testApp
         .http()
-        .patch(`/api/courseblock/update/${courseAId}/${block.id}`)
+        .patch(`/api/courses/${courseAId}/blocks/${block.id}`)
         .set(lecturerA.auth)
         .send({ title: 'New' })
         .expect(200);
@@ -182,7 +178,7 @@ describe('CourseBlock (e2e)', () => {
 
       await testApp
         .http()
-        .patch(`/api/courseblock/update/${courseAId}/${module.id}`)
+        .patch(`/api/courses/${courseAId}/blocks/${module.id}`)
         .set(lecturerA.auth)
         .send({ type: BlockType.TEXT })
         .expect(400);
@@ -192,13 +188,13 @@ describe('CourseBlock (e2e)', () => {
   // ---------------------------------------------------------------------------
   // Delete
   // ---------------------------------------------------------------------------
-  describe('DELETE /courseblock/delete/:courseId/:blockId', () => {
+  describe('DELETE /api/courses/:courseId/blocks/:blockId', () => {
     it('should delete the block', async () => {
       const block = await createBlock({ position: 0 });
 
       await testApp
         .http()
-        .delete(`/api/courseblock/delete/${courseAId}/${block.id}`)
+        .delete(`/api/courses/${courseAId}/blocks/${block.id}`)
         .set(lecturerA.auth)
         .expect(204);
 
@@ -211,7 +207,7 @@ describe('CourseBlock (e2e)', () => {
     it('should return 404 when block does not exist', async () => {
       await testApp
         .http()
-        .delete(`/api/courseblock/delete/${courseAId}/non-existent`)
+        .delete(`/api/courses/${courseAId}/blocks/non-existent`)
         .set(lecturerA.auth)
         .expect(404);
     });
@@ -220,7 +216,7 @@ describe('CourseBlock (e2e)', () => {
   // ---------------------------------------------------------------------------
   // Reorder
   // ---------------------------------------------------------------------------
-  describe('PATCH /courseblock/reorder/:courseId', () => {
+  describe('PATCH /api/courses/:courseId/blocks/reorder', () => {
     it('should reorder blocks and persist positions', async () => {
       const a = await createBlock({ position: 0, title: 'A' });
       const b = await createBlock({ position: 1, title: 'B' });
@@ -228,7 +224,7 @@ describe('CourseBlock (e2e)', () => {
 
       await testApp
         .http()
-        .patch(`/api/courseblock/reorder/${courseAId}`)
+        .patch(`/api/courses/${courseAId}/blocks/reorder`)
         .set(lecturerA.auth)
         .send({ blockIds: [c.id, b.id, a.id] })
         .expect(200);
@@ -245,7 +241,7 @@ describe('CourseBlock (e2e)', () => {
 
       await testApp
         .http()
-        .patch(`/api/courseblock/reorder/${courseAId}`)
+        .patch(`/api/courses/${courseAId}/blocks/reorder`)
         .set(lecturerA.auth)
         .send({ blockIds: [a.id, a.id] })
         .expect(400);
@@ -257,7 +253,7 @@ describe('CourseBlock (e2e)', () => {
 
       await testApp
         .http()
-        .patch(`/api/courseblock/reorder/${courseAId}`)
+        .patch(`/api/courses/${courseAId}/blocks/reorder`)
         .set(lecturerA.auth)
         .send({ blockIds: [a.id] })
         .expect(400);

@@ -1,6 +1,6 @@
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
-import { BlockType } from '../../generated/prisma/enums.js';
+import { BlockType } from '../../../generated/prisma/enums.js';
 import { CreateCourseBlockDto } from './create-course-block.dto.js';
 import { UpdateCourseBlockDto } from './update-course-block.dto.js';
 

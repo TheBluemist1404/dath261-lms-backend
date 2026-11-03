@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type { Prisma } from '../../generated/prisma/client.js';
-import { BlockType } from '../../generated/prisma/enums.js';
+import type { Prisma } from '../../../generated/prisma/client.js';
+import { BlockType } from '../../../generated/prisma/enums.js';
 
 export class CourseBlockResponseDto {
   @ApiProperty({ description: 'Unique identifier of the course block', example: 'clx123abc' })
