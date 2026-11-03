@@ -46,16 +46,28 @@ describe('CourseService - integration', () => {
   });
 
   async function cleanup() {
-    // Order matters: delete children before parents (FK constraints).
+    // Xóa enrollment của course do integration test tạo
+    // (cả enrollment của student-integration và của student khác nếu có)
     await prisma.enrollment.deleteMany({
-      where: { course: { lecturer: { email: { startsWith: PREFIX } } } },
+      where: {
+        OR: [
+          { course: { lecturer: { email: { startsWith: PREFIX } } } },
+          { user: { email: { startsWith: PREFIX } } },
+        ],
+      },
     });
+
+    // Xóa courseBlock của course do integration test tạo
     await prisma.courseBlock.deleteMany({
       where: { course: { lecturer: { email: { startsWith: PREFIX } } } },
     });
+
+    // Xóa course do integration test tạo
     await prisma.course.deleteMany({
       where: { lecturer: { email: { startsWith: PREFIX } } },
     });
+
+    // Xóa user do integration test tạo (lecturer + student)
     await prisma.user.deleteMany({
       where: { email: { startsWith: PREFIX } },
     });
