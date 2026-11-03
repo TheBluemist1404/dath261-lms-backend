@@ -2,6 +2,17 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CourseStatus } from '../../../generated/prisma/enums.js';
 
 //use for swagger UI
+export class LecturerSummaryDto {
+  @ApiProperty({ description: 'The ID of the lecturer.', example: 'clx789ghi' })
+  id: string;
+
+  @ApiProperty({
+    description: 'Display name of the lecturer (firstName + lastName).',
+    example: 'Nguyen Van A',
+  })
+  name: string;
+}
+
 export class CourseResponseDto {
   @ApiProperty({ description: 'The unique identifier of the course.', example: 'clx123abc' })
   id: string;
@@ -41,6 +52,19 @@ export class CourseResponseDto {
     example: 'clx789ghi',
   })
   lecturerId: string;
+
+  @ApiProperty({
+    description: 'Summary of the lecturer who owns the course.',
+    type: LecturerSummaryDto,
+  })
+  lecturer: LecturerSummaryDto;
+
+  @ApiPropertyOptional({
+    description:
+      'Number of active enrollments. Only populated on the lecturer course list endpoint.',
+    example: 12,
+  })
+  enrollmentCount?: number;
 
   @ApiPropertyOptional({
     description: 'The start date and time of the enrollment window.',
