@@ -23,7 +23,7 @@ import {
   QuizAttemptResponseDto,
   StudentAttemptAnswerResultDto,
 } from './dto/quiz-attempt-response.dto.js';
-import { QuizOptionInputDto, QuizQuestionInputDto } from './dto/quiz-question-input.dto.js';
+import { QuizQuestionInputDto } from './dto/quiz-question-input.dto.js';
 import { QuizQuestionResponseDto, QuizResponseDto } from './dto/quiz-response.dto.js';
 import {
   QuizStudentResponseDto,
