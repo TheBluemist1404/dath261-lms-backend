@@ -16,6 +16,7 @@ import { ProgressModule } from './modules/progress/progress.module.js';
 import { ReferencesModule } from './modules/references/references.module.js';
 import { SearchModule } from './modules/search/search.module.js';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
+import { QuizModule } from './modules/quiz/quiz.module.js';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -37,6 +38,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
     SearchModule,
     EnrollmentModule,
     ProgressModule,
+    QuizModule,
   ],
   providers: [
     {
