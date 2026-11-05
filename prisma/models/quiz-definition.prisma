@@ -1,0 +1,87 @@
+// ============================================================
+// QUIZ DEFINITION
+// Authoring-side models: quiz settings, questions, options.
+// Attempts live in assessment.prisma (QuizAttempt).
+// ============================================================
+
+enum QuestionType {
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+  FILL_IN_BLANK
+}
+
+enum QuizScoringMode {
+  HIGHEST
+  LATEST
+  AVERAGE
+}
+
+model QuizConfig {
+  id String @id @default(cuid())
+
+  courseBlockId String @unique @map("course_block_id")
+  courseBlock CourseBlock @relation("QuizConfigBlock", fields: [courseBlockId], references: [id], onDelete: Cascade)
+
+  maxAttempts Int @default(1) @map("max_attempts")
+  scoringMode QuizScoringMode @default(HIGHEST) @map("scoring_mode")
+
+  availableFrom DateTime? @map("available_from")
+  deadline DateTime?
+  allowLate Boolean @default(false) @map("allow_late")
+
+  // Set when the Lecturer releases results to Students.
+  // NULL = results not yet released (Students cannot see answer keys / per-question results).
+  resultsReleasedAt DateTime? @map("results_released_at")
+
+  // Free-form metadata not used for querying/grading
+  // (e.g. instructions, estimatedMinutes). MUST NOT contain answer keys.
+  metadata Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("quiz_configs")
+}
+
+model QuizQuestion {
+  id String @id @default(cuid())
+
+  courseBlockId String @map("course_block_id")
+  courseBlock CourseBlock @relation("QuizQuestions", fields: [courseBlockId], references: [id], onDelete: Cascade)
+
+  type QuestionType
+  text String
+  points Decimal @default(1) @db.Decimal(5, 2)
+  position Int
+
+  // FILL_IN_BLANK: JSON array of accepted string answers.
+  // Other types: null.
+  acceptedAnswers Json? @map("accepted_answers")
+
+  // TRUE_FALSE: the correct boolean.
+  // Other types: null.
+  correctBoolean Boolean? @map("correct_boolean")
+
+  options QuizOption[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([courseBlockId, position])
+  @@map("quiz_questions")
+}
+
+model QuizOption {
+  id String @id @default(cuid())
+
+  questionId String @map("question_id")
+  question QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  text String
+  isCorrect Boolean @default(false) @map("is_correct")
+  position Int
+
+  @@index([questionId, position])
+  @@map("quiz_options")
+}

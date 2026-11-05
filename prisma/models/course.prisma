@@ -1,3 +1,4 @@
+//course.prisma
 enum CourseStatus {
   DRAFT
   PUBLISHED
@@ -65,6 +66,10 @@ model CourseBlock {
   progressEntries BlockProgress[]
 
   quizAttempts QuizAttempt[] @relation("QuizBlockAttempts")
+
+  // === QUIZ DEFINITION RELATIONS (added for quiz module) ===
+  quizConfig QuizConfig?     @relation("QuizConfigBlock")
+  quizQuestions QuizQuestion[] @relation("QuizQuestions")
 
   assignmentSubmissions AssignmentSubmission[] @relation("AssignmentBlockSubmissions")
 
