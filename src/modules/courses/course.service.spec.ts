@@ -349,18 +349,18 @@ describe('CourseService - findOne', () => {
     expect(result.id).toBe(courseId);
   });
 
-  it('should throw ForbiddenException when non-owner reads DRAFT course', async () => {
+  it('should throw NotFoundException when non-owner reads DRAFT course', async () => {
     mockPrisma.course.findUnique.mockResolvedValue(buildCourse({ status: CourseStatus.DRAFT }));
 
-    await expect(service.findOne(courseId, otherId)).rejects.toThrow(ForbiddenException);
+    await expect(service.findOne(courseId, otherId)).rejects.toThrow(NotFoundException);
   });
 
-  it('should throw ForbiddenException when non-owner reads suspended course', async () => {
+  it('should throw NotFoundException when non-owner reads suspended course', async () => {
     mockPrisma.course.findUnique.mockResolvedValue(
       buildCourse({ status: CourseStatus.PUBLISHED, isSuspended: true }),
     );
 
-    await expect(service.findOne(courseId, otherId)).rejects.toThrow(ForbiddenException);
+    await expect(service.findOne(courseId, otherId)).rejects.toThrow(NotFoundException);
   });
 });
 

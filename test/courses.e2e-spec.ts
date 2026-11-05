@@ -76,8 +76,35 @@ describe('Course (e2e)', () => {
       await testApp.http().get('/api/courses').expect(401);
     });
 
-    it('should return 401 on POST /course/create without token', async () => {
+    it('should return 401 on POST /courses without token', async () => {
       await testApp.http().post('/api/courses').send({ title: 'No auth' }).expect(401);
+    });
+
+    it('should return 401 on GET /courses/:courseId without token', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+      });
+
+      await testApp.http().get(`/api/courses/${course.id}`).expect(401);
+    });
+
+    it('should let a guest read the catalog without a token', async () => {
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'public',
+        status: CourseStatus.PUBLISHED,
+      });
+      await createCourse({
+        lecturerId: lecturerA.id,
+        title: 'hidden draft',
+        status: CourseStatus.DRAFT,
+      });
+
+      const res = await testApp.http().get('/api/courses/catalog').expect(200);
+
+      expect(res.body.data.map((c: { title: string }) => c.title)).toEqual(['public']);
+      expect(res.body.meta.total).toBe(1);
     });
 
     it('should return 403 when a student tries to list own courses (LECTURER only)', async () => {
@@ -210,7 +237,7 @@ describe('Course (e2e)', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Read — get-all/published (catalog with search/filter/sort/pagination)
+  // Read — catalog (published courses with search/filter/sort/pagination)
   // ---------------------------------------------------------------------------
   describe('GET /api/courses/catalog', () => {
     it('should only return PUBLISHED and non-suspended courses with meta', async () => {
@@ -498,23 +525,23 @@ describe('Course (e2e)', () => {
       expect(res.body.id).toBe(course.id);
     });
 
-    it('should return 403 when student reads a DRAFT course', async () => {
+    it('should return 404 when student reads a DRAFT course', async () => {
       const course = await createCourse({
         lecturerId: lecturerA.id,
         status: CourseStatus.DRAFT,
       });
 
-      await testApp.http().get(`/api/courses/${course.id}`).set(student.auth).expect(403);
+      await testApp.http().get(`/api/courses/${course.id}`).set(student.auth).expect(404);
     });
 
-    it('should return 403 when non-owner reads a suspended course', async () => {
+    it('should return 404 when non-owner reads a suspended course', async () => {
       const course = await createCourse({
         lecturerId: lecturerA.id,
         status: CourseStatus.PUBLISHED,
         isSuspended: true,
       });
 
-      await testApp.http().get(`/api/courses/${course.id}`).set(lecturerB.auth).expect(403);
+      await testApp.http().get(`/api/courses/${course.id}`).set(lecturerB.auth).expect(404);
     });
 
     it('should return 404 when course does not exist', async () => {
@@ -722,7 +749,7 @@ describe('Course (e2e)', () => {
         status: CourseStatus.DRAFT,
       });
 
-      await testApp.http().get(`/api/courses/${course.id}`).set(student.auth).expect(403);
+      await testApp.http().get(`/api/courses/${course.id}`).set(student.auth).expect(404);
     });
   });
 });

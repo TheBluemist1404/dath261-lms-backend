@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Prisma } from '../../generated/prisma/client.js';
 import { BlockType, UserRole } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
-import { CourseBlockService } from './courseblock.service.js';
+import { CourseBlockService } from './course-block.service.js';
 
 const PREFIX = 'courseblock-integration-';
 

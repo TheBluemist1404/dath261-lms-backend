@@ -26,7 +26,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
-import { CourseBlockService } from './courseblock.service.js';
+import { CourseBlockService } from './course-block.service.js';
 import { CourseBlockResponseDto } from './dto/course-block-response.dto.js';
 import { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
 import { ReorderCourseBlocksDto } from './dto/reorder-course-block.dto.js';

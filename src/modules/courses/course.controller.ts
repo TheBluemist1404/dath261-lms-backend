@@ -25,6 +25,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { UserRole } from '../../generated/prisma/enums.js';
+import { Public } from '../auth/decorators/public.decorator.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { Roles } from '../authorization/roles.decorator.js';
 import { RolesGuard } from '../authorization/roles.guard.js';
@@ -57,8 +58,9 @@ export class CourseController {
   }
 
   @Get('catalog')
+  @Public()
   @ApiOperation({
-    summary: 'Get all published and non-suspended courses',
+    summary: 'Get all published and non-suspended courses (public, no sign-in needed)',
     description:
       'Supports search (title/description/prerequisites), filtering (lecturerId, enrollmentOpen), sorting, and pagination.',
   })
@@ -69,7 +71,6 @@ export class CourseController {
   @ApiBadRequestResponse({
     description: 'Invalid query parameters (e.g. unknown sortBy value).',
   })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token.' })
   findAllPublished(@Query() query: CourseQueryDto) {
     return this.courseService.findAllPublished(query);
   }
@@ -86,8 +87,9 @@ export class CourseController {
     type: CourseResponseDto,
   })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token.' })
-  @ApiForbiddenResponse({ description: 'You do not have access to this course.' })
-  @ApiNotFoundResponse({ description: 'Course not found.' })
+  @ApiNotFoundResponse({
+    description: 'Course not found, or a draft or suspended course the caller does not own.',
+  })
   findOne(@Param('courseId') courseId: string, @Req() req: { user: AuthenticatedUser }) {
     return this.courseService.findOne(courseId, req.user.userId);
   }

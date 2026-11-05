@@ -100,11 +100,11 @@ export class CourseService {
 
     const isOwner = course.lecturerId === requesterId;
 
-    // Draft protected content is not exposed through student-facing reads.
-    // Suspended courses are also hidden from non-owners (existing learners will
-    // be handled later via the Enrollment module).
+    // Draft and suspended courses are hidden from non-owners. They get the same
+    // 404 as a missing course, so a course id does not reveal that it exists.
+    // (Existing learners of a suspended course are handled by the Enrollment module.)
     if (!isOwner && (course.status !== CourseStatus.PUBLISHED || course.isSuspended)) {
-      throw new ForbiddenException('You do not have access to this course.');
+      throw new NotFoundException('Course not found.');
     }
 
     return this.toResponseDto(course);
