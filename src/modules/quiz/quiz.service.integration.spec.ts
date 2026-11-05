@@ -1,12 +1,8 @@
 // quiz.service.integration.spec.ts
+
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   BlockType,
@@ -19,8 +15,8 @@ import {
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
-import { QuizGradingService } from './quiz-grading.service.js';
 import { QuizService } from './quiz.service.js';
+import { QuizGradingService } from './quiz-grading.service.js';
 
 const PREFIX = 'quiz-integration-';
 
@@ -67,7 +63,9 @@ describe('QuizService - integration', () => {
     });
 
     await prisma.quizOption.deleteMany({
-      where: { question: { courseBlock: { course: { lecturer: { email: { startsWith: PREFIX } } } } } },
+      where: {
+        question: { courseBlock: { course: { lecturer: { email: { startsWith: PREFIX } } } } },
+      },
     });
 
     await prisma.quizQuestion.deleteMany({
@@ -352,9 +350,8 @@ describe('QuizService - integration', () => {
         },
       ]);
       const q = quiz.questions[0];
-      const correctIds = quiz.questions[0].options
-        ?.filter((o) => o.isCorrect)
-        .map((o) => o.id)!;
+      const correctIds =
+        quiz.questions[0].options?.filter((o) => o.isCorrect).map((o) => o.id) ?? [];
 
       // Wrong: missing one correct
       const partial = await service.submitAttempt(courseId, quiz.id, student.id, {
@@ -607,12 +604,7 @@ describe('QuizService - integration', () => {
         answers: [{ questionId: q.id, booleanAnswer: false }],
       });
 
-      const result = await service.listAttemptsForLecturer(
-        courseId,
-        quiz.id,
-        lecturer.id,
-        {},
-      );
+      const result = await service.listAttemptsForLecturer(courseId, quiz.id, lecturer.id, {});
 
       expect(result.data).toHaveLength(2);
       expect(result.meta.total).toBe(2);
