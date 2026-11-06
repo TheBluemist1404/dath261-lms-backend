@@ -52,6 +52,21 @@ The Prisma schema must be derived from the reviewed Notion data model. Do not ad
 
 Create migrations for reviewed schema changes and include migration impact in the PR.
 
+## Database Setup for Testing
+
+This project uses the `@flefebvre/prisma-test-helper` library to isolate databases per test file (Database-per-Worker). To run tests locally, your Postgres user **must have Superuser privileges**.
+
+### Prerequisites
+- PostgreSQL is installed and running.
+- The user specified in `DATABASE_URL` (typically `test`) must have the `SUPERUSER` privilege.
+
+### How to grant Superuser privileges
+Connect to PostgreSQL using the default superuser account (`postgres`), then run the following SQL command (replace `test` with the user defined in your `DATABASE_URL`):
+
+```sql
+ALTER ROLE test WITH SUPERUSER;
+```
+
 ## Authorization
 
 Role checks are only the first layer. Protected operations may depend on ownership, enrollment state, publication state, group membership, or explicit sharing.

@@ -14,6 +14,7 @@ import { DiscussionModule } from './modules/discussion/discussion.module.js';
 import { EnrollmentModule } from './modules/enrollments/enrollment.module.js';
 import { PagesModule } from './modules/pages/pages.module.js';
 import { ProgressModule } from './modules/progress/progress.module.js';
+import { QuizModule } from './modules/quiz/quiz.module.js';
 import { ReferencesModule } from './modules/references/references.module.js';
 import { SearchModule } from './modules/search/search.module.js';
 import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
@@ -38,6 +39,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
     SearchModule,
     EnrollmentModule,
     ProgressModule,
+    QuizModule,
     AuditModule,
   ],
   providers: [
