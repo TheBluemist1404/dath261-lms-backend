@@ -3,8 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
-import { AccountStatus, UserRole } from '../../generated/prisma/client.js';
+import {
+  AccountStatus,
+  AuditAction,
+  AuditEntityType,
+  UserRole,
+} from '../../generated/prisma/client.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { AuditService } from '../audit/audit.service.js';
 import { UserService } from '../users/user.service.js';
 import type { LoginDto } from './dto/login.dto.js';
 import { type RegisterDto, RegisterRole } from './dto/register.dto.js';
@@ -23,6 +29,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
   ) {}
 
   async login(dto: LoginDto): Promise<IssuedAuthTokens> {
@@ -36,6 +43,17 @@ export class AuthService {
     }
 
     if (user.status === AccountStatus.SUSPENDED) {
+      await this.auditService.record({
+        actorId: user.id,
+        action: AuditAction.SECURITY_EVENT,
+        entityType: AuditEntityType.USER,
+        entityId: user.id,
+        metadata: {
+          event: 'SUSPENDED_LOGIN_ATTEMPT',
+          email: user.email,
+        },
+      });
+
       throw new ForbiddenException('This account has been suspended.');
     }
 
@@ -121,14 +139,30 @@ export class AuthService {
     }
 
     if (session.user.status === AccountStatus.SUSPENDED) {
-      await this.prisma.authSession.updateMany({
-        where: {
-          id: session.id,
-          revokedAt: null,
-        },
-        data: {
-          revokedAt: now,
-        },
+      await this.prisma.$transaction(async (tx) => {
+        await tx.authSession.updateMany({
+          where: {
+            id: session.id,
+            revokedAt: null,
+          },
+          data: {
+            revokedAt: now,
+          },
+        });
+
+        await this.auditService.record(
+          {
+            actorId: session.user.id,
+            action: AuditAction.SECURITY_EVENT,
+            entityType: AuditEntityType.USER,
+            entityId: session.user.id,
+            metadata: {
+              event: 'SUSPENDED_SESSION_REVOKED',
+              sessionId: session.id,
+            },
+          },
+          tx,
+        );
       });
 
       throw new ForbiddenException('This account has been suspended.');

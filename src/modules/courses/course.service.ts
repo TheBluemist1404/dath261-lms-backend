@@ -6,8 +6,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client.js';
-import { CourseStatus, EnrollmentStatus } from '../../generated/prisma/enums.js';
+import {
+  AuditAction,
+  AuditEntityType,
+  CourseStatus,
+  EnrollmentStatus,
+} from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { AuditService } from '../audit/audit.service.js';
 import { CourseQueryDto } from './dto/course-query.dto.js';
 import { CourseResponseDto } from './dto/course-response.dto.js';
 import { CreateCourseDto } from './dto/create-course.dto.js';
@@ -20,7 +26,10 @@ const DEFAULT_LIMIT = 20;
 
 @Injectable()
 export class CourseService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   // ---------------------------------------------------------------------------
   // Shared include
@@ -48,7 +57,9 @@ export class CourseService {
       },
     });
     return courses.map((course) =>
-      this.toResponseDto(course, { enrollmentCount: course._count.enrollments }),
+      this.toResponseDto(course, {
+        enrollmentCount: course._count.enrollments,
+      }),
     );
   }
 
@@ -117,18 +128,32 @@ export class CourseService {
   async create(lecturerId: string, dto: CreateCourseDto): Promise<CourseResponseDto> {
     this.assertValidEnrollmentWindow(dto.enrollmentStartAt, dto.enrollmentEndAt);
 
-    const course = await this.prisma.course.create({
-      data: {
-        title: dto.title,
-        description: dto.description ?? null,
-        prerequisites: dto.prerequisites ?? null,
-        enrollmentStartAt: dto.enrollmentStartAt ? new Date(dto.enrollmentStartAt) : null,
-        enrollmentEndAt: dto.enrollmentEndAt ? new Date(dto.enrollmentEndAt) : null,
-        lecturerId,
-        status: CourseStatus.DRAFT,
-        isSuspended: false,
-      },
-      include: this.lecturerInclude,
+    const course = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.course.create({
+        data: {
+          title: dto.title,
+          description: dto.description ?? null,
+          prerequisites: dto.prerequisites ?? null,
+          enrollmentStartAt: dto.enrollmentStartAt ? new Date(dto.enrollmentStartAt) : null,
+          enrollmentEndAt: dto.enrollmentEndAt ? new Date(dto.enrollmentEndAt) : null,
+          lecturerId,
+          status: CourseStatus.DRAFT,
+          isSuspended: false,
+        },
+        include: this.lecturerInclude,
+      });
+
+      await this.auditService.record(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_CREATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: created.id,
+        },
+        tx,
+      );
+
+      return created;
     });
 
     return this.toResponseDto(course);
@@ -158,20 +183,45 @@ export class CourseService {
 
     this.assertValidEnrollmentWindow(nextStart, nextEnd);
 
-    const updated = await this.prisma.course.update({
-      where: { id: courseId },
-      data: {
-        ...(dto.title !== undefined && { title: dto.title }),
-        ...(dto.description !== undefined && { description: dto.description }),
-        ...(dto.prerequisites !== undefined && { prerequisites: dto.prerequisites }),
-        ...(dto.enrollmentStartAt !== undefined && {
-          enrollmentStartAt: dto.enrollmentStartAt ? new Date(dto.enrollmentStartAt) : null,
-        }),
-        ...(dto.enrollmentEndAt !== undefined && {
-          enrollmentEndAt: dto.enrollmentEndAt ? new Date(dto.enrollmentEndAt) : null,
-        }),
-      },
-      include: this.lecturerInclude,
+    const updateData = {
+      ...(dto.title !== undefined && {
+        title: dto.title,
+      }),
+      ...(dto.description !== undefined && {
+        description: dto.description,
+      }),
+      ...(dto.prerequisites !== undefined && {
+        prerequisites: dto.prerequisites,
+      }),
+      ...(dto.enrollmentStartAt !== undefined && {
+        enrollmentStartAt: dto.enrollmentStartAt ? new Date(dto.enrollmentStartAt) : null,
+      }),
+      ...(dto.enrollmentEndAt !== undefined && {
+        enrollmentEndAt: dto.enrollmentEndAt ? new Date(dto.enrollmentEndAt) : null,
+      }),
+    };
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.course.update({
+        where: { id: courseId },
+        data: updateData,
+        include: this.lecturerInclude,
+      });
+
+      await this.auditService.record(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseId,
+          metadata: {
+            changedFields: Object.keys(updateData),
+          },
+        },
+        tx,
+      );
+
+      return result;
     });
 
     return this.toResponseDto(updated);
@@ -182,7 +232,7 @@ export class CourseService {
     lecturerId: string,
     dto: UpdateCourseStatusDto,
   ): Promise<CourseResponseDto> {
-    await this.assertOwnership(courseId, lecturerId);
+    const course = await this.assertOwnership(courseId, lecturerId);
 
     if (dto.status === CourseStatus.PUBLISHED) {
       const blockCount = await this.prisma.courseBlock.count({
@@ -194,10 +244,30 @@ export class CourseService {
       }
     }
 
-    const updated = await this.prisma.course.update({
-      where: { id: courseId },
-      data: { status: dto.status },
-      include: this.lecturerInclude,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.course.update({
+        where: { id: courseId },
+        data: {
+          status: dto.status,
+        },
+        include: this.lecturerInclude,
+      });
+
+      await this.auditService.record(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_STATUS_CHANGED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseId,
+          metadata: {
+            from: course.status,
+            to: dto.status,
+          },
+        },
+        tx,
+      );
+
+      return result;
     });
 
     return this.toResponseDto(updated);
@@ -230,7 +300,9 @@ export class CourseService {
       const now = new Date();
       // A null boundary is treated as open-ended.
       where.AND = [
-        { OR: [{ enrollmentStartAt: null }, { enrollmentStartAt: { lte: now } }] },
+        {
+          OR: [{ enrollmentStartAt: null }, { enrollmentStartAt: { lte: now } }],
+        },
         { OR: [{ enrollmentEndAt: null }, { enrollmentEndAt: { gte: now } }] },
       ];
     }
@@ -283,7 +355,11 @@ export class CourseService {
       enrollmentEndAt: Date | null;
       createdAt: Date;
       updatedAt: Date;
-      lecturer: { id: string; firstName: string | null; lastName: string | null };
+      lecturer: {
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+      };
     },
     extra?: { enrollmentCount?: number },
   ): CourseResponseDto {
@@ -302,7 +378,9 @@ export class CourseService {
       isSuspended: course.isSuspended,
       lecturerId: course.lecturerId,
       lecturer: { id: course.lecturer.id, name },
-      ...(extra?.enrollmentCount !== undefined && { enrollmentCount: extra.enrollmentCount }),
+      ...(extra?.enrollmentCount !== undefined && {
+        enrollmentCount: extra.enrollmentCount,
+      }),
       enrollmentStartAt: course.enrollmentStartAt,
       enrollmentEndAt: course.enrollmentEndAt,
       createdAt: course.createdAt,

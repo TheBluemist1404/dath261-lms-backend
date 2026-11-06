@@ -2,7 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { PrismaModule } from '../../infrastructure/database/prisma/prisma.module.js';
+import { AuditModule } from '../audit/audit.module.js';
 import { UsersModule } from '../users/user.module.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
@@ -12,6 +13,8 @@ import { AccessTokenStrategy } from './strategies/access-token.strategy.js';
   imports: [
     ConfigModule,
     UsersModule,
+    AuditModule,
+    PrismaModule,
     PassportModule.register({
       defaultStrategy: 'access-token',
     }),
@@ -28,7 +31,7 @@ import { AccessTokenStrategy } from './strategies/access-token.strategy.js';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, AccessTokenStrategy, PrismaService],
+  providers: [AuthService, AccessTokenStrategy],
   exports: [AuthService],
 })
 export class AuthModule {}
