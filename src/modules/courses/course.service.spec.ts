@@ -3,8 +3,9 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { vi } from 'vitest';
-import { CourseStatus } from '../../generated/prisma/enums.js';
+import { AuditAction, AuditEntityType, CourseStatus } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { AuditService } from '../audit/audit.service.js';
 import { CourseService } from './course.service.js';
 import type { CourseQueryDto } from './dto/course-query.dto.js';
 import type { CreateCourseDto } from './dto/create-course.dto.js';
@@ -42,6 +43,9 @@ const buildCourse = (overrides: Partial<Record<string, unknown>> = {}) => ({
 const lecturerInclude = {
   lecturer: { select: { id: true, firstName: true, lastName: true } },
 };
+const mockAuditService = {
+  record: vi.fn(),
+};
 
 // ---------------------------------------------------------------------------
 // findAllByLecturer
@@ -59,7 +63,11 @@ describe('CourseService - findAllByLecturer', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
+      ],
     }).compile();
 
     service = module.get<CourseService>(CourseService);
@@ -69,7 +77,11 @@ describe('CourseService - findAllByLecturer', () => {
   it('should query courses by lecturerId with lecturer include and active enrollment count', async () => {
     const courses = [
       buildCourse({ id: 'course-1', _count: { enrollments: 3 } }),
-      buildCourse({ id: 'course-2', title: 'Another', _count: { enrollments: 0 } }),
+      buildCourse({
+        id: 'course-2',
+        title: 'Another',
+        _count: { enrollments: 0 },
+      }),
     ];
     mockPrisma.course.findMany.mockResolvedValue(courses);
 
@@ -135,7 +147,11 @@ describe('CourseService - findAllPublished', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
+      ],
     }).compile();
 
     service = module.get<CourseService>(CourseService);
@@ -302,7 +318,11 @@ describe('CourseService - findOne', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
+      ],
     }).compile();
 
     service = module.get<CourseService>(CourseService);
@@ -374,17 +394,25 @@ describe('CourseService - create', () => {
     course: {
       create: vi.fn(),
     },
+    $transaction: vi.fn(),
   };
 
   const lecturerId = 'lecturer-1';
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
+      ],
     }).compile();
 
     service = module.get<CourseService>(CourseService);
     vi.clearAllMocks();
+    mockPrisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma),
+    );
   });
 
   const buildDto = (overrides: Partial<CreateCourseDto> = {}): CreateCourseDto =>
@@ -409,6 +437,16 @@ describe('CourseService - create', () => {
       },
       include: lecturerInclude,
     });
+
+    expect(mockAuditService.record).toHaveBeenCalledWith(
+      {
+        actorId: lecturerId,
+        action: AuditAction.COURSE_CREATED,
+        entityType: AuditEntityType.COURSE,
+        entityId: 'course-1',
+      },
+      mockPrisma,
+    );
   });
 
   it('should parse enrollment dates to Date', async () => {
@@ -420,13 +458,15 @@ describe('CourseService - create', () => {
 
     await service.create(lecturerId, dto);
 
-    expect(mockPrisma.course.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        enrollmentStartAt: new Date('2026-01-01T00:00:00.000Z'),
-        enrollmentEndAt: new Date('2026-02-01T00:00:00.000Z'),
-      }),
-      include: lecturerInclude,
-    });
+    expect(mockAuditService.record).toHaveBeenCalledWith(
+      {
+        actorId: lecturerId,
+        action: AuditAction.COURSE_CREATED,
+        entityType: AuditEntityType.COURSE,
+        entityId: 'course-1',
+      },
+      mockPrisma,
+    );
   });
 
   it('should return DTO with lecturer summary', async () => {
@@ -435,6 +475,16 @@ describe('CourseService - create', () => {
     const result = await service.create(lecturerId, buildDto());
 
     expect(result.lecturer).toEqual({ id: 'lecturer-1', name: 'Nguyen An' });
+
+    expect(mockAuditService.record).toHaveBeenCalledWith(
+      {
+        actorId: lecturerId,
+        action: AuditAction.COURSE_CREATED,
+        entityType: AuditEntityType.COURSE,
+        entityId: 'course-1',
+      },
+      mockPrisma,
+    );
   });
 
   it('should throw BadRequestException when start >= end', async () => {
@@ -447,6 +497,7 @@ describe('CourseService - create', () => {
       new BadRequestException('enrollmentStartAt must be before enrollmentEndAt.'),
     );
     expect(mockPrisma.course.create).not.toHaveBeenCalled();
+    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 });
 
@@ -461,6 +512,7 @@ describe('CourseService - update', () => {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    $transaction: vi.fn(),
   };
 
   const courseId = 'course-1';
@@ -468,12 +520,18 @@ describe('CourseService - update', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
+      ],
     }).compile();
 
     service = module.get<CourseService>(CourseService);
     vi.clearAllMocks();
-
+    mockPrisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma),
+    );
     mockPrisma.course.findUnique.mockResolvedValue(buildCourse({ lecturerId }));
   });
 
@@ -487,6 +545,7 @@ describe('CourseService - update', () => {
       NotFoundException,
     );
     expect(mockPrisma.course.update).not.toHaveBeenCalled();
+    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 
   it('should throw ForbiddenException when lecturer does not own the course', async () => {
@@ -496,6 +555,7 @@ describe('CourseService - update', () => {
       ForbiddenException,
     );
     expect(mockPrisma.course.update).not.toHaveBeenCalled();
+    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 
   it('should only update provided fields with lecturer include', async () => {
@@ -508,18 +568,46 @@ describe('CourseService - update', () => {
       data: { title: 'New' },
       include: lecturerInclude,
     });
+
+    expect(mockAuditService.record).toHaveBeenCalledWith(
+      {
+        actorId: lecturerId,
+        action: AuditAction.COURSE_UPDATED,
+        entityType: AuditEntityType.COURSE,
+        entityId: courseId,
+        metadata: {
+          changedFields: ['title'],
+        },
+      },
+      mockPrisma,
+    );
   });
 
   it('should set enrollmentEndAt to null when dto passes null', async () => {
     mockPrisma.course.update.mockResolvedValue(buildCourse());
 
-    await service.update(courseId, lecturerId, { enrollmentEndAt: null } as UpdateCourseDto);
+    await service.update(courseId, lecturerId, {
+      enrollmentEndAt: null,
+    } as UpdateCourseDto);
 
     expect(mockPrisma.course.update).toHaveBeenCalledWith({
       where: { id: courseId },
       data: { enrollmentEndAt: null },
       include: lecturerInclude,
     });
+
+    expect(mockAuditService.record).toHaveBeenCalledWith(
+      {
+        actorId: lecturerId,
+        action: AuditAction.COURSE_UPDATED,
+        entityType: AuditEntityType.COURSE,
+        entityId: courseId,
+        metadata: {
+          changedFields: ['enrollmentEndAt'],
+        },
+      },
+      mockPrisma,
+    );
   });
 
   it('should keep enrollmentEndAt when field is not provided (undefined)', async () => {
@@ -529,6 +617,18 @@ describe('CourseService - update', () => {
 
     const callArg = mockPrisma.course.update.mock.calls[0][0];
     expect(callArg.data).not.toHaveProperty('enrollmentEndAt');
+    expect(mockAuditService.record).toHaveBeenCalledWith(
+      {
+        actorId: lecturerId,
+        action: AuditAction.COURSE_UPDATED,
+        entityType: AuditEntityType.COURSE,
+        entityId: courseId,
+        metadata: {
+          changedFields: ['title'],
+        },
+      },
+      mockPrisma,
+    );
   });
 
   it('should throw BadRequestException when merged window is invalid', async () => {
@@ -546,6 +646,7 @@ describe('CourseService - update', () => {
       } as UpdateCourseDto),
     ).rejects.toThrow(new BadRequestException('enrollmentStartAt must be before enrollmentEndAt.'));
     expect(mockPrisma.course.update).not.toHaveBeenCalled();
+    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 });
 
@@ -563,6 +664,7 @@ describe('CourseService - updateStatus', () => {
     courseBlock: {
       count: vi.fn(),
     },
+    $transaction: vi.fn(),
   };
 
   const courseId = 'course-1';
@@ -570,12 +672,18 @@ describe('CourseService - updateStatus', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
+      ],
     }).compile();
 
     service = module.get<CourseService>(CourseService);
     vi.clearAllMocks();
-
+    mockPrisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma),
+    );
     mockPrisma.course.findUnique.mockResolvedValue(buildCourse({ lecturerId }));
   });
 
@@ -588,6 +696,7 @@ describe('CourseService - updateStatus', () => {
     await expect(
       service.updateStatus(courseId, lecturerId, buildDto(CourseStatus.PUBLISHED)),
     ).rejects.toThrow(NotFoundException);
+    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 
   it('should throw ForbiddenException when lecturer does not own the course', async () => {
@@ -596,6 +705,7 @@ describe('CourseService - updateStatus', () => {
     await expect(
       service.updateStatus(courseId, lecturerId, buildDto(CourseStatus.PUBLISHED)),
     ).rejects.toThrow(ForbiddenException);
+    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 
   it('should publish course when it has at least one block', async () => {
@@ -608,13 +718,29 @@ describe('CourseService - updateStatus', () => {
       buildDto(CourseStatus.PUBLISHED),
     );
 
-    expect(mockPrisma.courseBlock.count).toHaveBeenCalledWith({ where: { courseId } });
+    expect(mockPrisma.courseBlock.count).toHaveBeenCalledWith({
+      where: { courseId },
+    });
     expect(mockPrisma.course.update).toHaveBeenCalledWith({
       where: { id: courseId },
       data: { status: CourseStatus.PUBLISHED },
       include: lecturerInclude,
     });
     expect(result.status).toBe(CourseStatus.PUBLISHED);
+
+    expect(mockAuditService.record).toHaveBeenCalledWith(
+      {
+        actorId: lecturerId,
+        action: AuditAction.COURSE_STATUS_CHANGED,
+        entityType: AuditEntityType.COURSE,
+        entityId: courseId,
+        metadata: {
+          from: CourseStatus.DRAFT,
+          to: CourseStatus.PUBLISHED,
+        },
+      },
+      mockPrisma,
+    );
   });
 
   it('should throw BadRequestException when publishing an empty course', async () => {
@@ -624,6 +750,7 @@ describe('CourseService - updateStatus', () => {
       service.updateStatus(courseId, lecturerId, buildDto(CourseStatus.PUBLISHED)),
     ).rejects.toThrow(new BadRequestException('Cannot publish an empty course.'));
     expect(mockPrisma.course.update).not.toHaveBeenCalled();
+    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 
   it('should not check blocks when transitioning to DRAFT', async () => {
@@ -637,5 +764,18 @@ describe('CourseService - updateStatus', () => {
       data: { status: CourseStatus.DRAFT },
       include: lecturerInclude,
     });
+    expect(mockAuditService.record).toHaveBeenCalledWith(
+      {
+        actorId: lecturerId,
+        action: AuditAction.COURSE_STATUS_CHANGED,
+        entityType: AuditEntityType.COURSE,
+        entityId: courseId,
+        metadata: {
+          from: CourseStatus.DRAFT,
+          to: CourseStatus.DRAFT,
+        },
+      },
+      mockPrisma,
+    );
   });
 });

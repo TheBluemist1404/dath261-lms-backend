@@ -12,8 +12,14 @@ vi.mock('bcrypt', () => ({
 
 import * as bcrypt from 'bcrypt';
 
-import { AccountStatus, UserRole } from '../../../generated/prisma/enums.js';
+import {
+  AccountStatus,
+  AuditAction,
+  AuditEntityType,
+  UserRole,
+} from '../../../generated/prisma/enums.js';
 import { PrismaService } from '../../../infrastructure/database/prisma/prisma.service.js';
+import { AuditService } from '../../audit/audit.service.js';
 import { UserService } from '../../users/user.service.js';
 import { AuthService } from '../auth.service.js';
 import { RegisterRole } from '../dto/register.dto.js';
@@ -42,6 +48,11 @@ describe('AuthService', () => {
       findUnique: vi.fn(),
       updateMany: vi.fn(),
     },
+    $transaction: vi.fn(),
+  };
+
+  const mockAuditService = {
+    record: vi.fn(),
   };
 
   const activeUser = {
@@ -85,8 +96,13 @@ describe('AuthService', () => {
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
       ],
     }).compile();
+
+    mockPrisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma),
+    );
 
     service = moduleRef.get(AuthService);
   });
@@ -219,6 +235,17 @@ describe('AuthService', () => {
       ).rejects.toThrow(ForbiddenException);
 
       expect(mockPrisma.authSession.create).not.toHaveBeenCalled();
+
+      expect(mockAuditService.record).toHaveBeenCalledWith({
+        actorId: activeUser.id,
+        action: AuditAction.SECURITY_EVENT,
+        entityType: AuditEntityType.USER,
+        entityId: activeUser.id,
+        metadata: {
+          event: 'SUSPENDED_LOGIN_ATTEMPT',
+          email: activeUser.email,
+        },
+      });
     });
   });
 
@@ -334,6 +361,21 @@ describe('AuthService', () => {
           },
         }),
       );
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: activeUser.id,
+          action: AuditAction.SECURITY_EVENT,
+          entityType: AuditEntityType.USER,
+          entityId: activeUser.id,
+          metadata: {
+            event: 'SUSPENDED_SESSION_REVOKED',
+            sessionId: 'session-1',
+          },
+        },
+        mockPrisma,
+      );
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
     });
 
     it('rejects if another request has already rotated the token', async () => {

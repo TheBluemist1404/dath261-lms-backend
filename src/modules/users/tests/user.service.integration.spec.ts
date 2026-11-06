@@ -2,8 +2,14 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { AccountStatus, UserRole } from '../../../generated/prisma/enums.js';
+import {
+  AccountStatus,
+  AuditAction,
+  AuditEntityType,
+  UserRole,
+} from '../../../generated/prisma/enums.js';
 import { PrismaService } from '../../../infrastructure/database/prisma/prisma.service.js';
+import { AuditService } from '../../audit/audit.service.js';
 import type { CreateUserData } from '../types/create-user.type.js';
 import { UserService } from '../user.service.js';
 
@@ -20,7 +26,7 @@ describe('UserService - integration', () => {
           envFilePath: '.env.test',
         }),
       ],
-      providers: [PrismaService, UserService],
+      providers: [PrismaService, UserService, AuditService],
     }).compile();
 
     prisma = moduleRef.get(PrismaService);
@@ -30,6 +36,15 @@ describe('UserService - integration', () => {
   });
 
   beforeEach(async () => {
+    await prisma.auditEntry.deleteMany({
+      where: {
+        actor: {
+          email: {
+            startsWith: 'service-integration-',
+          },
+        },
+      },
+    });
     await prisma.user.deleteMany({
       where: {
         email: {
@@ -114,13 +129,27 @@ describe('UserService - integration', () => {
       role: UserRole.STUDENT,
     });
 
-    const updated = await service.updateStatus(created.id, AccountStatus.SUSPENDED);
+    const updated = await service.updateStatus(created.id, AccountStatus.SUSPENDED, created.id);
 
     expect(updated.status).toBe(AccountStatus.SUSPENDED);
 
     const persisted = await service.getUserById(created.id);
 
     expect(persisted.status).toBe(AccountStatus.SUSPENDED);
+
+    const audit = await prisma.auditEntry.findFirstOrThrow({
+      where: {
+        actorId: created.id,
+        action: AuditAction.ACCOUNT_STATUS_CHANGED,
+        entityType: AuditEntityType.USER,
+        entityId: created.id,
+      },
+    });
+
+    expect(audit.metadata).toEqual({
+      from: AccountStatus.ACTIVE,
+      to: AccountStatus.SUSPENDED,
+    });
   });
 
   it('should reactivate a suspended user', async () => {
@@ -130,11 +159,34 @@ describe('UserService - integration', () => {
       role: UserRole.STUDENT,
     });
 
-    await service.updateStatus(created.id, AccountStatus.SUSPENDED);
+    await service.updateStatus(created.id, AccountStatus.SUSPENDED, created.id);
 
-    const updated = await service.updateStatus(created.id, AccountStatus.ACTIVE);
+    const updated = await service.updateStatus(created.id, AccountStatus.ACTIVE, created.id);
 
     expect(updated.status).toBe(AccountStatus.ACTIVE);
+    const audits = await prisma.auditEntry.findMany({
+      where: {
+        actorId: created.id,
+        action: AuditAction.ACCOUNT_STATUS_CHANGED,
+        entityType: AuditEntityType.USER,
+        entityId: created.id,
+      },
+    });
+
+    expect(audits).toHaveLength(2);
+
+    expect(audits.map((audit) => audit.metadata)).toEqual(
+      expect.arrayContaining([
+        {
+          from: AccountStatus.ACTIVE,
+          to: AccountStatus.SUSPENDED,
+        },
+        {
+          from: AccountStatus.SUSPENDED,
+          to: AccountStatus.ACTIVE,
+        },
+      ]),
+    );
   });
 
   it('should reject duplicate email', async () => {

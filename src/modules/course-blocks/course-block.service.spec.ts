@@ -3,11 +3,16 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { vi } from 'vitest';
-import { BlockType } from '../../generated/prisma/enums.js';
+import { AuditAction, AuditEntityType, BlockType } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { AuditService } from '../audit/audit.service.js';
 import { CourseBlockService } from './course-block.service.js';
 import type { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
 import type { UpdateCourseBlockDto } from './dto/update-course-block.dto.js';
+
+const mockAuditService = {
+  record: vi.fn(),
+};
 
 describe('CourseBlockService - create (ownership pass)', () => {
   let service: CourseBlockService;
@@ -20,6 +25,7 @@ describe('CourseBlockService - create (ownership pass)', () => {
       create: vi.fn(),
       aggregate: vi.fn(),
     },
+    $transaction: vi.fn(),
   };
 
   const courseId = 'course-abc';
@@ -27,11 +33,19 @@ describe('CourseBlockService - create (ownership pass)', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseBlockService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseBlockService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
+      ],
     }).compile();
 
     service = module.get<CourseBlockService>(CourseBlockService);
     vi.clearAllMocks();
+
+    mockPrisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma),
+    );
 
     mockPrisma.courseBlock.aggregate.mockResolvedValue({
       _max: { position: null },
@@ -70,6 +84,20 @@ describe('CourseBlockService - create (ownership pass)', () => {
       },
     });
 
+    expect(mockAuditService.record).toHaveBeenCalledWith(
+      {
+        actorId: lecturerId,
+        action: AuditAction.COURSE_UPDATED,
+        entityType: AuditEntityType.COURSE_BLOCK,
+        entityId: 'block-1',
+        metadata: {
+          courseId,
+          type: dto.type,
+        },
+      },
+      mockPrisma,
+    );
+
     // Verify that the result matches the expected result
     expect(result).toEqual(expectedResult);
   });
@@ -97,6 +125,20 @@ describe('CourseBlockService - create (ownership pass)', () => {
         parentModuleId: null, // ?? null
       },
     });
+
+    expect(mockAuditService.record).toHaveBeenCalledWith(
+      {
+        actorId: lecturerId,
+        action: AuditAction.COURSE_UPDATED,
+        entityType: AuditEntityType.COURSE_BLOCK,
+        entityId: 'block-2',
+        metadata: {
+          courseId,
+          type: dto.type,
+        },
+      },
+      mockPrisma,
+    );
   });
 
   it('should auto-increment position based on max position in sibling list', async () => {
@@ -127,6 +169,19 @@ describe('CourseBlockService - create (ownership pass)', () => {
         parentModuleId: null,
       },
     });
+    expect(mockAuditService.record).toHaveBeenCalledWith(
+      {
+        actorId: lecturerId,
+        action: AuditAction.COURSE_UPDATED,
+        entityType: AuditEntityType.COURSE_BLOCK,
+        entityId: 'block-x',
+        metadata: {
+          courseId,
+          type: dto.type,
+        },
+      },
+      mockPrisma,
+    );
   });
 });
 
@@ -143,6 +198,7 @@ describe('CourseBlockService - update', () => {
       count: vi.fn(),
       update: vi.fn(),
     },
+    $transaction: vi.fn(),
   };
 
   const courseId = 'course-abc';
@@ -151,7 +207,11 @@ describe('CourseBlockService - update', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseBlockService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseBlockService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
+      ],
     }).compile();
 
     service = module.get<CourseBlockService>(CourseBlockService);
@@ -162,6 +222,10 @@ describe('CourseBlockService - update', () => {
       id: courseId,
       lecturerId,
     });
+
+    mockPrisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma),
+    );
   });
 
   type UpdateDtoInput = Omit<UpdateCourseBlockDto, 'content'> & {
@@ -199,6 +263,19 @@ describe('CourseBlockService - update', () => {
         data: { title: 'New title' }, // không có type, position, content
       });
       expect(result).toEqual({ id: blockId, title: 'New title' });
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: ['title'],
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should update only type when only type is provided', async () => {
@@ -212,6 +289,20 @@ describe('CourseBlockService - update', () => {
         where: { id: blockId },
         data: { type: BlockType.VIDEO },
       });
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: ['type'],
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should update only content when only content is provided', async () => {
@@ -226,6 +317,20 @@ describe('CourseBlockService - update', () => {
         where: { id: blockId },
         data: { content },
       });
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: ['content'],
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should update multiple fields at once when provided', async () => {
@@ -247,6 +352,20 @@ describe('CourseBlockService - update', () => {
           content: { url: 'https://example.com/new.mp4' },
         },
       });
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: ['title', 'type', 'content'],
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should send an empty data object when dto is empty (no fields to update)', async () => {
@@ -261,6 +380,20 @@ describe('CourseBlockService - update', () => {
         where: { id: blockId },
         data: {},
       });
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: [],
+          },
+        },
+        mockPrisma,
+      );
     });
   });
 
@@ -277,6 +410,7 @@ describe('CourseBlockService - update', () => {
       );
       expect(mockPrisma.courseBlock.findFirst).not.toHaveBeenCalled();
       expect(mockPrisma.courseBlock.update).not.toHaveBeenCalled();
+      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
 
     it('should throw ForbiddenException when lecturer does not own the course', async () => {
@@ -291,6 +425,7 @@ describe('CourseBlockService - update', () => {
       );
       expect(mockPrisma.courseBlock.findFirst).not.toHaveBeenCalled();
       expect(mockPrisma.courseBlock.update).not.toHaveBeenCalled();
+      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
@@ -306,6 +441,7 @@ describe('CourseBlockService - update', () => {
         new NotFoundException('Course block not found'),
       );
       expect(mockPrisma.courseBlock.update).not.toHaveBeenCalled();
+      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
@@ -329,6 +465,7 @@ describe('CourseBlockService - update', () => {
         where: { parentModuleId: blockId },
       });
       expect(mockPrisma.courseBlock.update).not.toHaveBeenCalled();
+      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
 
     it('should allow changing MODULE to another type when it has no children', async () => {
@@ -348,6 +485,20 @@ describe('CourseBlockService - update', () => {
         where: { id: blockId },
         data: { type: BlockType.VIDEO },
       });
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: ['type'],
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should NOT check children when block is already MODULE and dto.type is also MODULE', async () => {
@@ -365,6 +516,20 @@ describe('CourseBlockService - update', () => {
         where: { id: blockId },
         data: { type: BlockType.MODULE, title: 'New title' },
       });
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: ['title', 'type'],
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should NOT check children when block is NOT a MODULE even if dto.type changes', async () => {
@@ -382,6 +547,20 @@ describe('CourseBlockService - update', () => {
         where: { id: blockId },
         data: { type: BlockType.VIDEO },
       });
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: ['type'],
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should NOT check children when dto.type is undefined (không đổi type)', async () => {
@@ -394,6 +573,20 @@ describe('CourseBlockService - update', () => {
       await service.update(courseId, blockId, lecturerId, dto);
 
       expect(mockPrisma.courseBlock.count).not.toHaveBeenCalled();
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: ['title'],
+          },
+        },
+        mockPrisma,
+      );
     });
   });
 
@@ -412,6 +605,19 @@ describe('CourseBlockService - update', () => {
       expect(callArg.data).not.toHaveProperty('type');
       expect(callArg.data).not.toHaveProperty('content');
       expect(callArg.data).toEqual({ title: 'New title' });
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: ['title'],
+          },
+        },
+        mockPrisma,
+      );
     });
   });
   // ---------------------------------------------------------------------------
@@ -428,6 +634,20 @@ describe('CourseBlockService - update', () => {
       expect(mockPrisma.courseBlock.findFirst).toHaveBeenCalledWith({
         where: { id: blockId, courseId },
       });
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: ['title'],
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should call update with where = { id: blockId } only (not courseId)', async () => {
@@ -441,6 +661,20 @@ describe('CourseBlockService - update', () => {
         where: { id: blockId }, // service chỉ dùng id
         data: { title: 'New title' },
       });
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: ['title'],
+          },
+        },
+        mockPrisma,
+      );
     });
   });
 });
@@ -454,6 +688,7 @@ describe('CourseBlockService - remove', () => {
       findFirst: vi.fn(),
       delete: vi.fn(),
     },
+    $transaction: vi.fn(),
   };
 
   const courseId = 'course-abc';
@@ -462,7 +697,11 @@ describe('CourseBlockService - remove', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseBlockService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseBlockService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
+      ],
     }).compile();
 
     service = module.get<CourseBlockService>(CourseBlockService);
@@ -472,6 +711,10 @@ describe('CourseBlockService - remove', () => {
     mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId });
     // Mặc định: block tồn tại trong course
     mockPrisma.courseBlock.findFirst.mockResolvedValue({ id: blockId, courseId });
+
+    mockPrisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma),
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -490,6 +733,17 @@ describe('CourseBlockService - remove', () => {
       where: { id: blockId },
     });
     expect(result).toEqual(deleted);
+
+    expect(mockAuditService.record).toHaveBeenCalledWith(
+      {
+        actorId: lecturerId,
+        action: AuditAction.COURSE_UPDATED,
+        entityType: AuditEntityType.COURSE_BLOCK,
+        entityId: blockId,
+        metadata: { courseId },
+      },
+      mockPrisma,
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -501,6 +755,7 @@ describe('CourseBlockService - remove', () => {
     await expect(service.remove(courseId, blockId, lecturerId)).rejects.toThrow(NotFoundException);
     expect(mockPrisma.courseBlock.findFirst).not.toHaveBeenCalled();
     expect(mockPrisma.courseBlock.delete).not.toHaveBeenCalled();
+    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 
   it('should throw ForbiddenException when lecturer does not own the course', async () => {
@@ -511,6 +766,7 @@ describe('CourseBlockService - remove', () => {
 
     await expect(service.remove(courseId, blockId, lecturerId)).rejects.toThrow(ForbiddenException);
     expect(mockPrisma.courseBlock.delete).not.toHaveBeenCalled();
+    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 
   // ---------------------------------------------------------------------------
@@ -523,6 +779,7 @@ describe('CourseBlockService - remove', () => {
       new NotFoundException('Course block not found'),
     );
     expect(mockPrisma.courseBlock.delete).not.toHaveBeenCalled();
+    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 });
 
@@ -546,7 +803,11 @@ describe('CourseBlockService - reorder', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseBlockService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseBlockService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
+      ],
     }).compile();
 
     service = module.get<CourseBlockService>(CourseBlockService);
@@ -598,6 +859,19 @@ describe('CourseBlockService - reorder', () => {
       expect(mockPrisma.course.findUnique).toHaveBeenCalledWith({
         where: { id: courseId },
       });
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseId,
+          metadata: {
+            blockIds,
+            parentModuleId: null,
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should reorder a single block (position = 0)', async () => {
@@ -612,6 +886,20 @@ describe('CourseBlockService - reorder', () => {
       const result = await service.reorder(courseId, blockIds, lecturerId);
 
       expect(result).toEqual([{ id: 'block-a', position: 0 }]);
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseId,
+          metadata: {
+            blockIds,
+            parentModuleId: null,
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should assign final positions by index of blockIds, not by DB position', async () => {
@@ -640,6 +928,20 @@ describe('CourseBlockService - reorder', () => {
         { id: 'block-a', position: 1 },
         { id: 'block-b', position: 2 },
       ]);
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseId,
+          metadata: {
+            blockIds,
+            parentModuleId: null,
+          },
+        },
+        mockPrisma,
+      );
     });
   });
 
@@ -656,6 +958,7 @@ describe('CourseBlockService - reorder', () => {
 
       expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
 
     it('should throw ForbiddenException when lecturer does not own the course', async () => {
@@ -670,6 +973,7 @@ describe('CourseBlockService - reorder', () => {
 
       expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
@@ -688,6 +992,7 @@ describe('CourseBlockService - reorder', () => {
       expect(mockPrisma.course.findUnique).not.toHaveBeenCalled();
       expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
@@ -708,6 +1013,7 @@ describe('CourseBlockService - reorder', () => {
 
       expect(mockPrisma.courseBlock.findMany).toHaveBeenCalledTimes(1);
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
@@ -730,6 +1036,7 @@ describe('CourseBlockService - reorder', () => {
 
       expect(mockPrisma.courseBlock.findMany).toHaveBeenCalledTimes(1);
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
@@ -749,6 +1056,7 @@ describe('CourseBlockService - reorder', () => {
       );
 
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
@@ -768,6 +1076,7 @@ describe('CourseBlockService - reorder', () => {
       );
 
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
@@ -789,6 +1098,20 @@ describe('CourseBlockService - reorder', () => {
         where: { courseId, id: { in: blockIds } },
         select: { id: true, parentModuleId: true, position: true },
       });
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseId,
+          metadata: {
+            blockIds,
+            parentModuleId: null,
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should call findMany #2 with courseId and parentModuleId', async () => {
@@ -809,6 +1132,20 @@ describe('CourseBlockService - reorder', () => {
         where: { courseId, parentModuleId },
         select: { id: true, position: true },
       });
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseId,
+          metadata: {
+            blockIds,
+            parentModuleId,
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should call $transaction exactly once', async () => {
@@ -822,6 +1159,20 @@ describe('CourseBlockService - reorder', () => {
       await service.reorder(courseId, blockIds, lecturerId);
 
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseId,
+          metadata: {
+            blockIds,
+            parentModuleId: null,
+          },
+        },
+        mockPrisma,
+      );
     });
   });
 
@@ -858,6 +1209,19 @@ describe('CourseBlockService - reorder', () => {
         where: { id: 'block-b' },
         data: { position: 1 },
       });
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseId,
+          metadata: {
+            blockIds,
+            parentModuleId: null,
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should throw BadRequestException when siblings array is empty (length mismatch)', async () => {
@@ -870,6 +1234,7 @@ describe('CourseBlockService - reorder', () => {
       await expect(service.reorder(courseId, blockIds, lecturerId)).rejects.toThrow(
         BadRequestException,
       );
+      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 });
