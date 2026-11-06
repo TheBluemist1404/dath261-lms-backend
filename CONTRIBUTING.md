@@ -65,6 +65,7 @@ Connect to PostgreSQL using the default superuser account (`postgres`), then run
 
 ```sql
 ALTER ROLE test WITH SUPERUSER;
+```
 
 ## Authorization
 
