@@ -79,39 +79,60 @@ export class UserService {
     return user;
   }
 
-  async updateStatus(id: string, status: AccountStatus, actorId: string): Promise<PublicUser> {
-    return this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.findUnique({
-        where: { id },
-        omit: excludePublicUserFields,
-      });
+  async updateStatus(
+    id: string,
+    status: AccountStatus,
+    actorId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<PublicUser> {
+    if (tx) {
+      return this.updateStatusInTransaction(tx, id, status, actorId);
+    }
 
-      if (!user) {
-        throw new NotFoundException('User not found');
-      }
+    return this.prisma.$transaction((transaction) =>
+      this.updateStatusInTransaction(transaction, id, status, actorId),
+    );
+  }
 
-      const updated = await tx.user.update({
-        where: { id },
-        data: { status },
-        omit: excludePublicUserFields,
-      });
-
-      await this.auditService.record(
-        {
-          actorId,
-          action: AuditAction.ACCOUNT_STATUS_CHANGED,
-          entityType: AuditEntityType.USER,
-          entityId: id,
-          metadata: {
-            from: user.status,
-            to: status,
-          },
-        },
-        tx,
-      );
-
-      return updated;
+  private async updateStatusInTransaction(
+    tx: Prisma.TransactionClient,
+    id: string,
+    status: AccountStatus,
+    actorId: string,
+  ): Promise<PublicUser> {
+    const user = await tx.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+      },
     });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const updated = await tx.user.update({
+      where: { id },
+      data: { status },
+      omit: excludePublicUserFields,
+    });
+
+    await this.auditService.record(
+      {
+        actorId,
+        action: AuditAction.ACCOUNT_STATUS_CHANGED,
+        entityType: AuditEntityType.USER,
+        entityId: id,
+        metadata: {
+          from: user.status,
+          to: status,
+        },
+      },
+      tx,
+    );
+
+    return updated;
   }
 
   async getUserByEmailForAuth(email: string): Promise<AuthUser | null> {
