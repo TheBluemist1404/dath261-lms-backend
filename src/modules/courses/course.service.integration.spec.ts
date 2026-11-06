@@ -3,12 +3,15 @@ import { ConfigModule } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  AuditAction,
+  AuditEntityType,
   BlockType,
   CourseStatus,
   EnrollmentStatus,
   UserRole,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { AuditService } from '../audit/audit.service.js';
 import { CourseService } from './course.service.js';
 import type { CourseQueryDto } from './dto/course-query.dto.js';
 
@@ -30,7 +33,7 @@ describe('CourseService - integration', () => {
           envFilePath: '.env',
         }),
       ],
-      providers: [PrismaService, CourseService],
+      providers: [PrismaService, CourseService, AuditService],
     }).compile();
 
     prisma = moduleRef.get(PrismaService);
@@ -48,6 +51,16 @@ describe('CourseService - integration', () => {
   async function cleanup() {
     // Xóa enrollment của course do integration test tạo
     // (cả enrollment của student-integration và của student khác nếu có)
+    await prisma.auditEntry.deleteMany({
+      where: {
+        actor: {
+          email: {
+            startsWith: PREFIX,
+          },
+        },
+      },
+    });
+
     await prisma.enrollment.deleteMany({
       where: {
         OR: [
@@ -200,7 +213,10 @@ describe('CourseService - integration', () => {
   // ---------------------------------------------------------------------------
   describe('findAllPublished', () => {
     const q = (overrides: Partial<CourseQueryDto> = {}): CourseQueryDto =>
-      ({ ...overrides }) as CourseQueryDto;
+      ({
+        lecturerId: lecturerA.id,
+        ...overrides,
+      }) as CourseQueryDto;
 
     it('should return only PUBLISHED and non-suspended courses with meta', async () => {
       await createCourse({
@@ -235,7 +251,7 @@ describe('CourseService - integration', () => {
         status: CourseStatus.DRAFT,
       });
 
-      const result = await service.findAllPublished(q());
+      const result = await service.findAllPublished(q({ lecturerId: lecturerB.id }));
 
       expect(result.data).toEqual([]);
       expect(result.meta.total).toBe(0);
@@ -466,6 +482,16 @@ describe('CourseService - integration', () => {
       expect(persisted.prerequisites).toBeNull();
       expect(persisted.enrollmentStartAt).toBeNull();
       expect(persisted.enrollmentEndAt).toBeNull();
+
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_CREATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: created.id,
+        },
+      });
+      expect(audit.metadata).toBeNull();
     });
 
     it('should persist provided optional fields and parse dates', async () => {
@@ -482,6 +508,16 @@ describe('CourseService - integration', () => {
       expect(persisted.prerequisites).toBe('Pre');
       expect(persisted.enrollmentStartAt?.toISOString()).toBe('2026-01-01T00:00:00.000Z');
       expect(persisted.enrollmentEndAt?.toISOString()).toBe('2026-02-01T00:00:00.000Z');
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_CREATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: created.id,
+        },
+      });
+
+      expect(audit.metadata).toBeNull();
     });
 
     it('should throw BadRequestException and not persist when window is invalid', async () => {
@@ -497,6 +533,16 @@ describe('CourseService - integration', () => {
         where: { lecturerId: lecturerA.id },
       });
       expect(count).toBe(0);
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_CREATED,
+          entityType: AuditEntityType.COURSE,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
   });
 
@@ -518,6 +564,18 @@ describe('CourseService - integration', () => {
       const persisted = await prisma.course.findUniqueOrThrow({ where: { id: course.id } });
       expect(persisted.title).toBe('New');
       expect(persisted.description).toBe('New desc');
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: course.id,
+        },
+      });
+
+      expect(audit.metadata).toEqual({
+        changedFields: ['title', 'description'],
+      });
     });
 
     it('should set enrollmentEndAt to null when dto passes null', async () => {
@@ -532,6 +590,18 @@ describe('CourseService - integration', () => {
       const persisted = await prisma.course.findUniqueOrThrow({ where: { id: course.id } });
       expect(persisted.enrollmentEndAt).toBeNull();
       expect(persisted.enrollmentStartAt?.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: course.id,
+        },
+      });
+
+      expect(audit.metadata).toEqual({
+        changedFields: ['enrollmentEndAt'],
+      });
     });
 
     it('should keep enrollmentEndAt when field is not provided', async () => {
@@ -545,6 +615,19 @@ describe('CourseService - integration', () => {
 
       const persisted = await prisma.course.findUniqueOrThrow({ where: { id: course.id } });
       expect(persisted.enrollmentEndAt?.toISOString()).toBe('2026-02-01T00:00:00.000Z');
+
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: course.id,
+        },
+      });
+
+      expect(audit.metadata).toEqual({
+        changedFields: ['title'],
+      });
     });
 
     it('should reject merged window that becomes invalid after update', async () => {
@@ -562,12 +645,33 @@ describe('CourseService - integration', () => {
 
       const persisted = await prisma.course.findUniqueOrThrow({ where: { id: course.id } });
       expect(persisted.enrollmentEndAt?.toISOString()).toBe('2026-02-01T00:00:00.000Z');
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: course.id,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
 
     it('should throw NotFoundException when course does not exist', async () => {
       await expect(
         service.update('non-existent-course', lecturerA.id, { title: 'New' }),
       ).rejects.toThrow('Course not found.');
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: 'non-existent-course',
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
 
     it('should throw ForbiddenException when lecturer does not own the course', async () => {
@@ -579,6 +683,16 @@ describe('CourseService - integration', () => {
 
       const persisted = await prisma.course.findUniqueOrThrow({ where: { id: course.id } });
       expect(persisted.title).toBe('Old');
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          entityType: AuditEntityType.COURSE,
+          entityId: course.id,
+          action: AuditAction.COURSE_UPDATED,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
   });
 
@@ -613,6 +727,20 @@ describe('CourseService - integration', () => {
 
       const persisted = await prisma.course.findUniqueOrThrow({ where: { id: course.id } });
       expect(persisted.status).toBe(CourseStatus.PUBLISHED);
+
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_STATUS_CHANGED,
+          entityType: AuditEntityType.COURSE,
+          entityId: course.id,
+        },
+      });
+
+      expect(audit.metadata).toEqual({
+        from: CourseStatus.DRAFT,
+        to: CourseStatus.PUBLISHED,
+      });
     });
 
     it('should reject publishing an empty course', async () => {
@@ -627,6 +755,17 @@ describe('CourseService - integration', () => {
 
       const persisted = await prisma.course.findUniqueOrThrow({ where: { id: course.id } });
       expect(persisted.status).toBe(CourseStatus.DRAFT);
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_STATUS_CHANGED,
+          entityType: AuditEntityType.COURSE,
+          entityId: course.id,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
 
     it('should allow transitioning PUBLISHED back to DRAFT without block check', async () => {
@@ -640,6 +779,20 @@ describe('CourseService - integration', () => {
       });
 
       expect(updated.status).toBe(CourseStatus.DRAFT);
+
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_STATUS_CHANGED,
+          entityType: AuditEntityType.COURSE,
+          entityId: course.id,
+        },
+      });
+
+      expect(audit.metadata).toEqual({
+        from: CourseStatus.PUBLISHED,
+        to: CourseStatus.DRAFT,
+      });
     });
 
     it('should throw ForbiddenException when lecturer does not own the course', async () => {
@@ -655,6 +808,16 @@ describe('CourseService - integration', () => {
 
       const persisted = await prisma.course.findUniqueOrThrow({ where: { id: course.id } });
       expect(persisted.status).toBe(CourseStatus.DRAFT);
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          entityType: AuditEntityType.COURSE,
+          entityId: course.id,
+          action: AuditAction.COURSE_STATUS_CHANGED,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
 
     it('should throw NotFoundException when course does not exist', async () => {
@@ -663,6 +826,17 @@ describe('CourseService - integration', () => {
           status: CourseStatus.PUBLISHED,
         }),
       ).rejects.toThrow('Course not found.');
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_STATUS_CHANGED,
+          entityType: AuditEntityType.COURSE,
+          entityId: 'non-existent-course',
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
   });
 });
