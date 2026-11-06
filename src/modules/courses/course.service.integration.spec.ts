@@ -15,7 +15,7 @@ import { AuditService } from '../audit/audit.service.js';
 import { CourseService } from './course.service.js';
 import type { CourseQueryDto } from './dto/course-query.dto.js';
 
-const PREFIX = 'course-integration-';
+const PREFIXES = ['course-integration-', 'lecturer-', 'student-', 'admin-'] as const;
 
 describe('CourseService - integration', () => {
   let service: CourseService;
@@ -49,40 +49,41 @@ describe('CourseService - integration', () => {
   });
 
   async function cleanup() {
-    // Xóa enrollment của course do integration test tạo
-    // (cả enrollment của student-integration và của student khác nếu có)
+    const userEmailStartsWith = PREFIXES.map((p) => ({ email: { startsWith: p } }));
+
+    // Xóa enrollment thuộc course của lecturer test hoặc của user test.
     await prisma.auditEntry.deleteMany({
-      where: {
-        actor: {
-          email: {
-            startsWith: PREFIX,
-          },
-        },
-      },
+      where: { actor: { OR: userEmailStartsWith } },
     });
 
     await prisma.enrollment.deleteMany({
       where: {
         OR: [
-          { course: { lecturer: { email: { startsWith: PREFIX } } } },
-          { user: { email: { startsWith: PREFIX } } },
+          { course: { lecturer: { OR: userEmailStartsWith } } },
+          { user: { OR: userEmailStartsWith } },
         ],
       },
     });
 
-    // Xóa courseBlock của course do integration test tạo
+    // Xóa courseBlock thuộc course của lecturer test.
     await prisma.courseBlock.deleteMany({
-      where: { course: { lecturer: { email: { startsWith: PREFIX } } } },
+      where: {
+        course: {
+          lecturer: { OR: userEmailStartsWith },
+        },
+      },
     });
 
-    // Xóa course do integration test tạo
+    // Xóa course của lecturer test.
     await prisma.course.deleteMany({
-      where: { lecturer: { email: { startsWith: PREFIX } } },
+      where: {
+        lecturer: { OR: userEmailStartsWith },
+      },
     });
 
-    // Xóa user do integration test tạo (lecturer + student)
+    // Xóa user test (lecturer + student).
     await prisma.user.deleteMany({
-      where: { email: { startsWith: PREFIX } },
+      where: { OR: userEmailStartsWith },
     });
   }
 
@@ -91,7 +92,7 @@ describe('CourseService - integration', () => {
 
     lecturerA = await prisma.user.create({
       data: {
-        email: `${PREFIX}lecturer-a@example.com`,
+        email: `${PREFIXES[0]}lecturer-a@example.com`,
         passwordHash: 'hash',
         firstName: 'Nguyen',
         lastName: 'An',
@@ -100,7 +101,7 @@ describe('CourseService - integration', () => {
     });
     lecturerB = await prisma.user.create({
       data: {
-        email: `${PREFIX}lecturer-b@example.com`,
+        email: `${PREFIXES[0]}lecturer-b@example.com`,
         passwordHash: 'hash',
         firstName: 'Tran',
         lastName: 'Binh',
@@ -146,7 +147,7 @@ describe('CourseService - integration', () => {
   ) {
     const student = await prisma.user.create({
       data: {
-        email: `${PREFIX}student-${emailSuffix}@example.com`,
+        email: `${PREFIXES[0]}student-${emailSuffix}@example.com`,
         passwordHash: 'hash',
         role: UserRole.STUDENT,
       },

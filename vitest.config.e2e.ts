@@ -7,8 +7,11 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['test/**/*.e2e-spec.ts'],
-    // Suites share one database and reset it, so they must not overlap.
-    fileParallelism: false,
+    globalSetup: ['./global-setup.ts'],
+    setupFiles: ['./setup.ts'],
+    pool: 'forks',
+    isolate: true,
+    hookTimeout: 30_000,
     env: {
       NODE_ENV: 'test',
       DATABASE_URL: 'postgresql://test:test@localhost:5432/datn261_test',
