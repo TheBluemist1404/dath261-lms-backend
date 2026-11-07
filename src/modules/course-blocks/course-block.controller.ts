@@ -78,7 +78,7 @@ export class CourseBlockController {
     return this.courseBlockSerivice.create(courseId, req.user.userId, dto);
   }
 
-  @Patch('reorder')
+  @Patch('order')
   @ApiOperation({ summary: 'Reorder course blocks within a specific course' })
   @ApiParam({ name: 'courseId', description: 'The ID of the course', example: 'clx456def' })
   @ApiOkResponse({
