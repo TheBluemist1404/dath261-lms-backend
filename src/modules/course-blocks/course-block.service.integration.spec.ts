@@ -4,6 +4,8 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Prisma } from '../../generated/prisma/client.js';
 import {
+  AuditAction,
+  AuditEntityType,
   BlockType,
   CourseStatus,
   EnrollmentStatus,
@@ -11,6 +13,7 @@ import {
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { EnrollmentService } from '../../modules/enrollments/enrollment.service.js';
+import { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { CourseBlockService } from './course-block.service.js';
 
@@ -35,7 +38,7 @@ describe('CourseBlockService - integration', () => {
           envFilePath: '.env',
         }),
       ],
-      providers: [PrismaService, CourseBlockService, EnrollmentService],
+      providers: [PrismaService, CourseBlockService, AuditService, EnrollmentService],
     }).compile();
 
     prisma = moduleRef.get(PrismaService);
@@ -51,6 +54,15 @@ describe('CourseBlockService - integration', () => {
   });
 
   async function cleanup() {
+    await prisma.auditEntry.deleteMany({
+      where: {
+        actor: {
+          email: {
+            startsWith: PREFIX,
+          },
+        },
+      },
+    });
     // Xóa enrollment trước (FK tới user + course)
     await prisma.enrollment.deleteMany({
       where: {
@@ -265,10 +277,23 @@ describe('CourseBlockService - integration', () => {
         where: { id: block.id },
       });
       expect(persisted.position).toBe(0);
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: block.id,
+        },
+      });
+
+      expect(audit.metadata).toEqual({
+        courseId: courseA.id,
+        type: BlockType.TEXT,
+      });
     });
 
     it('should auto-increment position for subsequent root blocks', async () => {
-      await service.create(courseA.id, lecturerA.id, {
+      const first = await service.create(courseA.id, lecturerA.id, {
         type: BlockType.TEXT,
         title: 'First',
       });
@@ -279,6 +304,24 @@ describe('CourseBlockService - integration', () => {
       });
 
       expect(second.position).toBe(1);
+
+      const audits = await prisma.auditEntry.findMany({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: { in: [first.id, second.id] },
+        },
+      });
+
+      expect(audits).toHaveLength(2);
+
+      for (const audit of audits) {
+        expect(audit.metadata).toEqual({
+          courseId: courseA.id,
+          type: BlockType.TEXT,
+        });
+      }
     });
 
     it('should compute position per parent module (children start at 0)', async () => {
@@ -302,10 +345,38 @@ describe('CourseBlockService - integration', () => {
       expect(child1.position).toBe(0);
       expect(child2.position).toBe(1);
       expect(child1.parentModuleId).toBe(module.id);
+
+      const audits = await prisma.auditEntry.findMany({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: { in: [module.id, child1.id, child2.id] },
+        },
+      });
+
+      expect(audits).toHaveLength(3);
+
+      const auditByEntityId = new Map(audits.map((audit) => [audit.entityId, audit]));
+
+      expect(auditByEntityId.get(module.id)?.metadata).toEqual({
+        courseId: courseA.id,
+        type: BlockType.MODULE,
+      });
+
+      expect(auditByEntityId.get(child1.id)?.metadata).toEqual({
+        courseId: courseA.id,
+        type: BlockType.TEXT,
+      });
+
+      expect(auditByEntityId.get(child2.id)?.metadata).toEqual({
+        courseId: courseA.id,
+        type: BlockType.TEXT,
+      });
     });
 
     it('should compute position independently per course', async () => {
-      await service.create(courseA.id, lecturerA.id, {
+      const blockA = await service.create(courseA.id, lecturerA.id, {
         type: BlockType.TEXT,
         title: 'A1',
       });
@@ -316,6 +387,34 @@ describe('CourseBlockService - integration', () => {
       });
 
       expect(blockB.position).toBe(0);
+
+      const auditA = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockA.id,
+        },
+      });
+
+      expect(auditA.metadata).toEqual({
+        courseId: courseA.id,
+        type: BlockType.TEXT,
+      });
+
+      const auditB = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerB.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockB.id,
+        },
+      });
+
+      expect(auditB.metadata).toEqual({
+        courseId: courseB.id,
+        type: BlockType.TEXT,
+      });
     });
 
     it('should reject parent module that belongs to another course', async () => {
@@ -332,6 +431,16 @@ describe('CourseBlockService - integration', () => {
           parentModuleId: foreignModule.id,
         }),
       ).rejects.toThrow('Parent module must belong to the same course');
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
 
     it('should reject parent that is not a MODULE', async () => {
@@ -347,6 +456,16 @@ describe('CourseBlockService - integration', () => {
           parentModuleId: textBlock.id,
         }),
       ).rejects.toThrow('Parent block must be a MODULE');
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
 
     it('should reject unknown parent id', async () => {
@@ -357,6 +476,16 @@ describe('CourseBlockService - integration', () => {
           parentModuleId: 'does-not-exist',
         }),
       ).rejects.toThrow('Parent module must belong to the same course');
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
   });
 
@@ -379,6 +508,20 @@ describe('CourseBlockService - integration', () => {
       });
       expect(persisted.title).toBe('New');
       expect(persisted.content).toEqual({ url: 'https://example.com/new.mp4' });
+
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: block.id,
+        },
+      });
+
+      expect(audit.metadata).toEqual({
+        courseId: courseA.id,
+        changedFields: ['title', 'content'],
+      });
     });
 
     it('should throw NotFoundException when block does not exist in the course', async () => {
@@ -387,6 +530,17 @@ describe('CourseBlockService - integration', () => {
           title: 'New',
         }),
       ).rejects.toThrow('Course block not found');
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: 'non-existent-block',
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
 
     it('should reject changing MODULE to another type when it has children', async () => {
@@ -398,6 +552,17 @@ describe('CourseBlockService - integration', () => {
           type: BlockType.TEXT,
         }),
       ).rejects.toThrow('Cannot change a MODULE that has children');
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: module.id,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
 
     it('should allow changing MODULE to another type when it has no children', async () => {
@@ -408,6 +573,20 @@ describe('CourseBlockService - integration', () => {
       });
 
       expect(updated.type).toBe(BlockType.TEXT);
+
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: module.id,
+        },
+      });
+
+      expect(audit.metadata).toEqual({
+        courseId: courseA.id,
+        changedFields: ['type'],
+      });
     });
   });
 
@@ -426,12 +605,36 @@ describe('CourseBlockService - integration', () => {
         where: { id: block.id },
       });
       expect(persisted).toBeNull();
+
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: block.id,
+        },
+      });
+
+      expect(audit.metadata).toEqual({
+        courseId: courseA.id,
+      });
     });
 
     it('should throw NotFoundException when block does not exist', async () => {
       await expect(service.remove(courseA.id, 'non-existent-block', lecturerA.id)).rejects.toThrow(
         'Course block not found',
       );
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: 'non-existent-block',
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
 
     it('should cascade delete children when removing a MODULE', async () => {
@@ -445,6 +648,19 @@ describe('CourseBlockService - integration', () => {
         where: { id: { in: [module.id, child1.id, child2.id] } },
       });
       expect(remaining).toEqual([]);
+
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: module.id,
+        },
+      });
+
+      expect(audit.metadata).toEqual({
+        courseId: courseA.id,
+      });
     });
   });
 
@@ -467,6 +683,20 @@ describe('CourseBlockService - integration', () => {
       });
       expect(persisted.map((p) => p.title)).toEqual(['C', 'B', 'A']);
       expect(persisted.map((p) => p.position)).toEqual([0, 1, 2]);
+
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseA.id,
+        },
+      });
+
+      expect(audit.metadata).toEqual({
+        blockIds: [c.id, b.id, a.id],
+        parentModuleId: null,
+      });
     });
 
     it('should reorder children inside a MODULE', async () => {
@@ -482,6 +712,20 @@ describe('CourseBlockService - integration', () => {
       });
       expect(persisted.map((p) => p.id)).toEqual([c2.id, c1.id]);
       expect(persisted.map((p) => p.position)).toEqual([0, 1]);
+
+      const audit = await prisma.auditEntry.findFirstOrThrow({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseA.id,
+        },
+      });
+
+      expect(audit.metadata).toEqual({
+        blockIds: [c2.id, c1.id],
+        parentModuleId: module.id,
+      });
     });
 
     it('should reject duplicate ids', async () => {
@@ -490,6 +734,17 @@ describe('CourseBlockService - integration', () => {
       await expect(service.reorder(courseA.id, [a.id, a.id], lecturerA.id)).rejects.toThrow(
         'Duplicate block IDs are not allowed',
       );
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseA.id,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
 
     it('should reject ids that belong to another course', async () => {
@@ -502,6 +757,17 @@ describe('CourseBlockService - integration', () => {
       await expect(service.reorder(courseA.id, [a.id, foreign.id], lecturerA.id)).rejects.toThrow(
         'Some blocks do not belong to this course',
       );
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseA.id,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
 
     it('should reject blocks with different parentModuleId', async () => {
@@ -512,6 +778,17 @@ describe('CourseBlockService - integration', () => {
       await expect(service.reorder(courseA.id, [root.id, child.id], lecturerA.id)).rejects.toThrow(
         'All blocks must belong to the same sibling list',
       );
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseA.id,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
 
     it('should reject incomplete sibling list', async () => {
@@ -522,6 +799,17 @@ describe('CourseBlockService - integration', () => {
       await expect(service.reorder(courseA.id, [a.id], lecturerA.id)).rejects.toThrow(
         'You must provide all blocks in the parent module',
       );
+
+      const auditCount = await prisma.auditEntry.count({
+        where: {
+          actorId: lecturerA.id,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseA.id,
+        },
+      });
+
+      expect(auditCount).toBe(0);
     });
   });
 });

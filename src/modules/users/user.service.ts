@@ -1,6 +1,8 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { AccountStatus, Prisma, User } from '../../generated/prisma/client.js';
+import type { AccountStatus, Prisma } from '../../generated/prisma/client.js';
+import { AuditAction, AuditEntityType } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { AuditService } from '../audit/audit.service.js';
 import type { CreateUserData } from './types/create-user.type.js';
 
 const excludePublicUserFields = {
@@ -24,7 +26,10 @@ export type PublicUser = Prisma.UserGetPayload<{
 }>;
 @Injectable()
 export class UserService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   async createUser(data: CreateUserData): Promise<PublicUser> {
     const existingUser = await this.prisma.user.findUnique({
@@ -74,20 +79,38 @@ export class UserService {
     return user;
   }
 
-  async updateStatus(id: string, status: AccountStatus): Promise<PublicUser> {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-      omit: excludePublicUserFields,
-    });
+  async updateStatus(id: string, status: AccountStatus, actorId: string): Promise<PublicUser> {
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.findUnique({
+        where: { id },
+        omit: excludePublicUserFields,
+      });
 
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
 
-    return this.prisma.user.update({
-      where: { id },
-      data: { status },
-      omit: excludePublicUserFields,
+      const updated = await tx.user.update({
+        where: { id },
+        data: { status },
+        omit: excludePublicUserFields,
+      });
+
+      await this.auditService.record(
+        {
+          actorId,
+          action: AuditAction.ACCOUNT_STATUS_CHANGED,
+          entityType: AuditEntityType.USER,
+          entityId: id,
+          metadata: {
+            from: user.status,
+            to: status,
+          },
+        },
+        tx,
+      );
+
+      return updated;
     });
   }
 

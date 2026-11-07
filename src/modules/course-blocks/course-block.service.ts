@@ -5,8 +5,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BlockType } from '../../generated/prisma/enums.js';
+import { AuditAction, AuditEntityType, BlockType } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
 import { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
@@ -16,6 +17,7 @@ import { UpdateCourseBlockDto } from './dto/update-course-block.dto.js';
 export class CourseBlockService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
     private readonly enrollmentService: EnrollmentService,
   ) {}
 
@@ -91,15 +93,33 @@ export class CourseBlockService {
 
     const nextPosition = (aggregate._max.position ?? -1) + 1;
 
-    return this.prisma.courseBlock.create({
-      data: {
-        courseId,
-        type: dto.type,
-        title: dto.title,
-        content: dto.content,
-        position: nextPosition,
-        parentModuleId: dto.parentModuleId ?? null,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const block = await tx.courseBlock.create({
+        data: {
+          courseId,
+          type: dto.type,
+          title: dto.title,
+          content: dto.content,
+          position: nextPosition,
+          parentModuleId: dto.parentModuleId ?? null,
+        },
+      });
+
+      await this.auditService.record(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: block.id,
+          metadata: {
+            courseId,
+            type: dto.type,
+          },
+        },
+        tx,
+      );
+
+      return block;
     });
   }
 
@@ -132,15 +152,39 @@ export class CourseBlockService {
       }
     }
 
-    return this.prisma.courseBlock.update({
-      where: { id: blockId },
-      data: {
-        ...(dto.title !== undefined && { title: dto.title }),
-        ...(dto.type !== undefined && { type: dto.type }),
-        ...(dto.content !== undefined && {
-          content: dto.content,
-        }),
-      },
+    const updateData = {
+      ...(dto.title !== undefined && {
+        title: dto.title,
+      }),
+      ...(dto.type !== undefined && {
+        type: dto.type,
+      }),
+      ...(dto.content !== undefined && {
+        content: dto.content,
+      }),
+    };
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.courseBlock.update({
+        where: { id: blockId },
+        data: updateData,
+      });
+
+      await this.auditService.record(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+            changedFields: Object.keys(updateData),
+          },
+        },
+        tx,
+      );
+
+      return updated;
     });
   }
 
@@ -156,8 +200,25 @@ export class CourseBlockService {
       throw new NotFoundException('Course block not found');
     }
 
-    return this.prisma.courseBlock.delete({
-      where: { id: blockId },
+    return this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.courseBlock.delete({
+        where: { id: blockId },
+      });
+
+      await this.auditService.record(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE_BLOCK,
+          entityId: blockId,
+          metadata: {
+            courseId,
+          },
+        },
+        tx,
+      );
+
+      return deleted;
     });
   }
 
@@ -247,6 +308,20 @@ export class CourseBlockService {
 
         reorderedBlocks.push(block);
       }
+
+      await this.auditService.record(
+        {
+          actorId: lecturerId,
+          action: AuditAction.COURSE_UPDATED,
+          entityType: AuditEntityType.COURSE,
+          entityId: courseId,
+          metadata: {
+            blockIds,
+            parentModuleId,
+          },
+        },
+        tx,
+      );
 
       return reorderedBlocks;
     });

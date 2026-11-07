@@ -2,12 +2,22 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AccountStatus, UserRole } from '../../../generated/prisma/enums.js';
+import {
+  AccountStatus,
+  AuditAction,
+  AuditEntityType,
+  UserRole,
+} from '../../../generated/prisma/enums.js';
 import { PrismaService } from '../../../infrastructure/database/prisma/prisma.service.js';
+import { AuditService } from '../../audit/audit.service.js';
 import { UserService } from '../user.service.js';
 
 describe('UserService', () => {
   let service: UserService;
+
+  const mockAuditService = {
+    record: vi.fn(),
+  };
 
   const mockPrisma = {
     user: {
@@ -15,6 +25,7 @@ describe('UserService', () => {
       create: vi.fn(),
       update: vi.fn(),
     },
+    $transaction: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -25,12 +36,20 @@ describe('UserService', () => {
           provide: PrismaService,
           useValue: mockPrisma,
         },
+        {
+          provide: AuditService,
+          useValue: mockAuditService,
+        },
       ],
     }).compile();
 
     service = moduleRef.get(UserService);
 
     vi.clearAllMocks();
+
+    mockPrisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma),
+    );
   });
 
   const mockData = {
@@ -155,7 +174,7 @@ describe('UserService', () => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
       mockPrisma.user.update.mockResolvedValue(updatedUser);
 
-      const result = await service.updateStatus(id, AccountStatus.SUSPENDED);
+      const result = await service.updateStatus(id, AccountStatus.SUSPENDED, 'admin-1');
 
       expect(result).toEqual(updatedUser);
 
@@ -175,12 +194,26 @@ describe('UserService', () => {
           passwordHash: true,
         },
       });
+
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        {
+          actorId: 'admin-1',
+          action: AuditAction.ACCOUNT_STATUS_CHANGED,
+          entityType: AuditEntityType.USER,
+          entityId: id,
+          metadata: {
+            from: AccountStatus.ACTIVE,
+            to: AccountStatus.SUSPENDED,
+          },
+        },
+        mockPrisma,
+      );
     });
 
     it('should throw NotFoundException when user does not exist', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.updateStatus(id, AccountStatus.SUSPENDED)).rejects.toThrow(
+      await expect(service.updateStatus(id, AccountStatus.SUSPENDED, 'admin-1')).rejects.toThrow(
         NotFoundException,
       );
 
