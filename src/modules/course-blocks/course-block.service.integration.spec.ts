@@ -3,8 +3,15 @@ import { ConfigModule } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Prisma } from '../../generated/prisma/client.js';
-import { BlockType, UserRole } from '../../generated/prisma/enums.js';
+import {
+  BlockType,
+  CourseStatus,
+  EnrollmentStatus,
+  UserRole,
+} from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { EnrollmentService } from '../../modules/enrollments/enrollment.service.js';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { CourseBlockService } from './course-block.service.js';
 
 const PREFIX = 'courseblock-integration-';
@@ -16,6 +23,7 @@ describe('CourseBlockService - integration', () => {
 
   let lecturerA: { id: string };
   let lecturerB: { id: string };
+  let student: { id: string };
   let courseA: { id: string };
   let courseB: { id: string };
 
@@ -27,7 +35,7 @@ describe('CourseBlockService - integration', () => {
           envFilePath: '.env',
         }),
       ],
-      providers: [PrismaService, CourseBlockService],
+      providers: [PrismaService, CourseBlockService, EnrollmentService],
     }).compile();
 
     prisma = moduleRef.get(PrismaService);
@@ -43,6 +51,14 @@ describe('CourseBlockService - integration', () => {
   });
 
   async function cleanup() {
+    // Xóa enrollment trước (FK tới user + course)
+    await prisma.enrollment.deleteMany({
+      where: {
+        user: {
+          email: { startsWith: PREFIX },
+        },
+      },
+    });
     await prisma.courseBlock.deleteMany({
       where: {
         course: {
@@ -81,6 +97,13 @@ describe('CourseBlockService - integration', () => {
         role: UserRole.LECTURER,
       },
     });
+    student = await prisma.user.create({
+      data: {
+        email: `${PREFIX}student@example.com`,
+        passwordHash: 'hash',
+        role: UserRole.STUDENT,
+      },
+    });
 
     courseA = await prisma.course.create({
       data: {
@@ -116,30 +139,111 @@ describe('CourseBlockService - integration', () => {
     });
   }
 
+  function enroll(
+    userId: string,
+    courseId: string,
+    status: EnrollmentStatus = EnrollmentStatus.ACTIVE,
+  ) {
+    return prisma.enrollment.create({
+      data: {
+        userId,
+        courseId,
+        status,
+        ...(status === EnrollmentStatus.LEFT && { leftAt: new Date() }),
+      },
+    });
+  }
+
+  function setCourseStatus(courseId: string, status: CourseStatus, isSuspended = false) {
+    return prisma.course.update({
+      where: { id: courseId },
+      data: { status, isSuspended },
+    });
+  }
+
+  const asUser = (userId: string): AuthenticatedUser => ({ userId }) as AuthenticatedUser;
+
   // ---------------------------------------------------------------------------
   // findAll
   // ---------------------------------------------------------------------------
   describe('findAll', () => {
-    it('should return blocks ordered by position ascending', async () => {
+    it('should return blocks ordered by position ascending for the owner', async () => {
       await createBlock({ position: 2, title: 'C' });
       await createBlock({ position: 0, title: 'A' });
       await createBlock({ position: 1, title: 'B' });
 
-      const blocks = await service.findAll(courseA.id, lecturerA.id);
+      const blocks = await service.findAll(courseA.id, asUser(lecturerA.id));
 
       expect(blocks.map((b) => b.title)).toEqual(['A', 'B', 'C']);
       expect(blocks.map((b) => b.position)).toEqual([0, 1, 2]);
     });
 
-    it('should throw NotFoundException when course does not exist', async () => {
-      await expect(service.findAll('non-existent-course', lecturerA.id)).rejects.toThrow(
-        'Course not found',
+    it('should return blocks for the owner even when the course is Draft', async () => {
+      await setCourseStatus(courseA.id, CourseStatus.DRAFT, false);
+      await createBlock({ position: 0, title: 'Draft block' });
+
+      const blocks = await service.findAll(courseA.id, asUser(lecturerA.id));
+
+      expect(blocks.map((b) => b.title)).toEqual(['Draft block']);
+    });
+
+    it('should allow an enrolled student to list blocks of a Published, non-suspended course', async () => {
+      await setCourseStatus(courseA.id, CourseStatus.PUBLISHED, false);
+      await enroll(student.id, courseA.id, EnrollmentStatus.ACTIVE);
+      await createBlock({ position: 0, title: 'A' });
+      await createBlock({ position: 1, title: 'B' });
+
+      const blocks = await service.findAll(courseA.id, asUser(student.id));
+
+      expect(blocks.map((b) => b.title)).toEqual(['A', 'B']);
+    });
+
+    it('should reject an enrolled student when the course is Draft', async () => {
+      await setCourseStatus(courseA.id, CourseStatus.DRAFT, false);
+      await enroll(student.id, courseA.id, EnrollmentStatus.ACTIVE);
+
+      await expect(service.findAll(courseA.id, asUser(student.id))).rejects.toThrow(
+        'You do not have access to this course.',
       );
     });
 
-    it('should throw ForbiddenException when lecturer does not own the course', async () => {
-      await expect(service.findAll(courseA.id, lecturerB.id)).rejects.toThrow(
-        'You do not own this course',
+    it('should reject an enrolled student when the course is suspended', async () => {
+      await setCourseStatus(courseA.id, CourseStatus.PUBLISHED, true);
+      await enroll(student.id, courseA.id, EnrollmentStatus.ACTIVE);
+
+      await expect(service.findAll(courseA.id, asUser(student.id))).rejects.toThrow(
+        'You do not have access to this course.',
+      );
+    });
+
+    it('should reject a non-enrolled student', async () => {
+      await setCourseStatus(courseA.id, CourseStatus.PUBLISHED, false);
+
+      await expect(service.findAll(courseA.id, asUser(student.id))).rejects.toThrow(
+        'You do not have access to this course.',
+      );
+    });
+
+    it('should reject a student whose enrollment status is LEFT', async () => {
+      await setCourseStatus(courseA.id, CourseStatus.PUBLISHED, false);
+      await enroll(student.id, courseA.id, EnrollmentStatus.LEFT);
+
+      await expect(service.findAll(courseA.id, asUser(student.id))).rejects.toThrow(
+        'You do not have access to this course.',
+      );
+    });
+
+    it('should reject a non-owner lecturer with no enrollment', async () => {
+      await setCourseStatus(courseA.id, CourseStatus.PUBLISHED, false);
+
+      await expect(service.findAll(courseA.id, asUser(lecturerB.id))).rejects.toThrow(
+        'You do not have access to this course.',
+      );
+    });
+
+    it('should throw NotFoundException when course does not exist', async () => {
+      await expect(service.findAll('non-existent-course', asUser(lecturerA.id))).rejects.toThrow(
+        'Course not found',
       );
     });
   });

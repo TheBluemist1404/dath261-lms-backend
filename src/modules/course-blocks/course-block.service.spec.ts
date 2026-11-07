@@ -5,9 +5,153 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { vi } from 'vitest';
 import { BlockType } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { EnrollmentService } from '../../modules/enrollments/enrollment.service.js';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { CourseBlockService } from './course-block.service.js';
 import type { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
 import type { UpdateCourseBlockDto } from './dto/update-course-block.dto.js';
+
+// Mock dùng chung cho mọi describe — inject để CourseBlockService khởi tạo được.
+// Chỉ describe('findAll') mới thực sự sử dụng hành vi của mock này.
+const mockEnrollmentService = {
+  assertCanAccessCourse: vi.fn(),
+};
+
+describe('CourseBlockService - findAll', () => {
+  let service: CourseBlockService;
+
+  const mockPrisma = {
+    course: {
+      findUnique: vi.fn(),
+    },
+    courseBlock: {
+      findMany: vi.fn(),
+    },
+  };
+
+  const courseId = 'course-abc';
+  const ownerId = 'lecturer-123';
+  const studentId = 'student-456';
+
+  const buildUser = (userId: string): AuthenticatedUser => ({ userId }) as AuthenticatedUser;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CourseBlockService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrollmentService, useValue: mockEnrollmentService },
+      ],
+    }).compile();
+
+    service = module.get<CourseBlockService>(CourseBlockService);
+    vi.clearAllMocks();
+
+    mockPrisma.courseBlock.findMany.mockResolvedValue([
+      { id: 'b1', position: 0 },
+      { id: 'b2', position: 1 },
+    ]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Owner
+  // ---------------------------------------------------------------------------
+  it('should return all blocks for the owner without calling assertCanAccessCourse', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId: ownerId });
+
+    const result = await service.findAll(courseId, buildUser(ownerId));
+
+    expect(result).toHaveLength(2);
+    expect(mockEnrollmentService.assertCanAccessCourse).not.toHaveBeenCalled();
+    expect(mockPrisma.courseBlock.findMany).toHaveBeenCalledWith({
+      where: { courseId },
+      orderBy: { position: 'asc' },
+    });
+  });
+
+  it('should return all blocks for the owner even when the course is Draft', async () => {
+    // Service chỉ đọc lecturerId từ course — không quan tâm status cho owner.
+    mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId: ownerId });
+
+    const result = await service.findAll(courseId, buildUser(ownerId));
+
+    expect(result).toHaveLength(2);
+    expect(mockEnrollmentService.assertCanAccessCourse).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Non-owner: student
+  // ---------------------------------------------------------------------------
+  it('should return blocks for a student when assertCanAccessCourse passes', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId: ownerId });
+    mockEnrollmentService.assertCanAccessCourse.mockResolvedValue({
+      id: 'enrollment-1',
+      status: 'ACTIVE',
+    });
+
+    const result = await service.findAll(courseId, buildUser(studentId));
+
+    expect(result).toHaveLength(2);
+    expect(mockEnrollmentService.assertCanAccessCourse).toHaveBeenCalledWith(studentId, courseId);
+    expect(mockPrisma.courseBlock.findMany).toHaveBeenCalledWith({
+      where: { courseId },
+      orderBy: { position: 'asc' },
+    });
+  });
+
+  it('should throw ForbiddenException when a non-enrolled student is rejected', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId: ownerId });
+    mockEnrollmentService.assertCanAccessCourse.mockRejectedValue(
+      new ForbiddenException('You do not have access to this course.'),
+    );
+
+    await expect(service.findAll(courseId, buildUser(studentId))).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
+  });
+
+  it('should throw ForbiddenException when an enrolled student hits a Draft/Suspended course', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId: ownerId });
+    mockEnrollmentService.assertCanAccessCourse.mockRejectedValue(
+      new ForbiddenException('You do not have access to this course.'),
+    );
+
+    await expect(service.findAll(courseId, buildUser(studentId))).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
+  });
+
+  it('should throw ForbiddenException when a non-owner lecturer calls findAll without enrollment', async () => {
+    const otherLecturerId = 'lecturer-999';
+    mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId: ownerId });
+    mockEnrollmentService.assertCanAccessCourse.mockRejectedValue(
+      new ForbiddenException('You do not have access to this course.'),
+    );
+
+    await expect(service.findAll(courseId, buildUser(otherLecturerId))).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(mockEnrollmentService.assertCanAccessCourse).toHaveBeenCalledWith(
+      otherLecturerId,
+      courseId,
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // Course not found
+  // ---------------------------------------------------------------------------
+  it('should throw NotFoundException when the course does not exist', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue(null);
+
+    await expect(service.findAll(courseId, buildUser(studentId))).rejects.toThrow(
+      new NotFoundException('Course not found'),
+    );
+    expect(mockEnrollmentService.assertCanAccessCourse).not.toHaveBeenCalled();
+    expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
+  });
+});
 
 describe('CourseBlockService - create (ownership pass)', () => {
   let service: CourseBlockService;
@@ -27,7 +171,11 @@ describe('CourseBlockService - create (ownership pass)', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseBlockService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseBlockService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrollmentService, useValue: mockEnrollmentService },
+      ],
     }).compile();
 
     service = module.get<CourseBlockService>(CourseBlockService);
@@ -151,7 +299,11 @@ describe('CourseBlockService - update', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseBlockService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseBlockService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrollmentService, useValue: mockEnrollmentService },
+      ],
     }).compile();
 
     service = module.get<CourseBlockService>(CourseBlockService);
@@ -462,7 +614,11 @@ describe('CourseBlockService - remove', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseBlockService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseBlockService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrollmentService, useValue: mockEnrollmentService },
+      ],
     }).compile();
 
     service = module.get<CourseBlockService>(CourseBlockService);
@@ -546,7 +702,11 @@ describe('CourseBlockService - reorder', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CourseBlockService, { provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        CourseBlockService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrollmentService, useValue: mockEnrollmentService },
+      ],
     }).compile();
 
     service = module.get<CourseBlockService>(CourseBlockService);
