@@ -46,10 +46,10 @@ export class CourseBlockController {
     type: [CourseBlockResponseDto],
   })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token.' })
-  @ApiForbiddenResponse({ description: 'You do not own this course.' })
+  @ApiForbiddenResponse({ description: 'You do not have access to this course.' })
   @ApiNotFoundResponse({ description: 'Course not found.' })
   findAll(@Param('courseId') courseId: string, @Req() req: { user: AuthenticatedUser }) {
-    return this.courseBlockSerivice.findAll(courseId, req.user.userId);
+    return this.courseBlockSerivice.findAll(courseId, req.user);
   }
 
   @Post()
