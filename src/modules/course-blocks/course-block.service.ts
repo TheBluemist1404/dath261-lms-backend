@@ -8,6 +8,8 @@ import {
 import { AuditAction, AuditEntityType, BlockType } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
+import { EnrollmentService } from '../enrollments/enrollment.service.js';
 import { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
 import { UpdateCourseBlockDto } from './dto/update-course-block.dto.js';
 
@@ -16,6 +18,7 @@ export class CourseBlockService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly enrollmentService: EnrollmentService,
   ) {}
 
   // Kiểm tra khóa học có tồn tại và thuộc lecturer hiện tại không
@@ -37,8 +40,20 @@ export class CourseBlockService {
   }
 
   // Lấy danh sách block theo thứ tự
-  async findAll(courseId: string, lecturerId: string) {
-    await this.checkCourseOwnership(courseId, lecturerId);
+  async findAll(courseId: string, user: AuthenticatedUser) {
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+      select: { id: true, lecturerId: true },
+    });
+
+    if (!course) {
+      throw new NotFoundException('Course not found');
+    }
+
+    // user is not the lecturer, check if user is enrolled in the course
+    if (course.lecturerId !== user.userId) {
+      await this.enrollmentService.assertCanAccessCourse(user.userId, courseId);
+    }
 
     return this.prisma.courseBlock.findMany({
       where: { courseId },
