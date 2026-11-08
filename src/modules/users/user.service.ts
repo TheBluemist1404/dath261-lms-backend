@@ -84,13 +84,14 @@ export class UserService {
     status: AccountStatus,
     actorId: string,
     tx?: Prisma.TransactionClient,
+    reason?: string,
   ): Promise<PublicUser> {
     if (tx) {
       return this.updateStatusInTransaction(tx, id, status, actorId);
     }
 
     return this.prisma.$transaction((transaction) =>
-      this.updateStatusInTransaction(transaction, id, status, actorId),
+      this.updateStatusInTransaction(transaction, id, status, actorId, reason),
     );
   }
 
@@ -99,6 +100,7 @@ export class UserService {
     id: string,
     status: AccountStatus,
     actorId: string,
+    reason?: string,
   ): Promise<PublicUser> {
     const user = await tx.user.findUnique({
       where: { id },
@@ -127,6 +129,7 @@ export class UserService {
         metadata: {
           from: user.status,
           to: status,
+          ...(reason !== undefined && { reason }),
         },
       },
       tx,

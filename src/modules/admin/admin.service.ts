@@ -114,7 +114,7 @@ export class AdminService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       // UserService updates the status and writes the audit entry using this tx.
-      const user = await this.userService.updateStatus(userId, dto.status, adminId, tx);
+      const user = await this.userService.updateStatus(userId, dto.status, adminId, tx, dto.reason);
 
       // Revoke every active refresh session when suspending.
       if (dto.status === AccountStatus.SUSPENDED) {
@@ -213,6 +213,7 @@ export class AdminService {
           metadata: {
             fromSuspended: current.isSuspended,
             toSuspended: dto.suspended,
+            ...(dto.reason !== undefined && { reason: dto.reason }),
           },
         },
         tx,
