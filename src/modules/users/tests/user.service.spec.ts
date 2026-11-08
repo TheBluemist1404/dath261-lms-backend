@@ -180,8 +180,9 @@ describe('UserService', () => {
 
       expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
         where: { id },
-        omit: {
-          passwordHash: true,
+        select: {
+          id: true,
+          status: true,
         },
       });
 
