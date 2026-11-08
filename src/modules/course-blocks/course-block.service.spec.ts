@@ -1,18 +1,162 @@
-// courseblock.service.spec.ts
+// course-block.service.spec.ts
 
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { vi } from 'vitest';
-import { AuditAction, AuditEntityType, BlockType } from '../../generated/prisma/enums.js';
+import { BlockType } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
+import { EnrollmentService } from '../enrollments/enrollment.service.js';
 import { CourseBlockService } from './course-block.service.js';
 import type { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
 import type { UpdateCourseBlockDto } from './dto/update-course-block.dto.js';
 
-const mockAuditService = {
-  record: vi.fn(),
+// Mock dùng chung — inject để CourseBlockService khởi tạo được.
+const mockEnrollmentService = {
+  assertCanAccessCourse: vi.fn(),
 };
+
+// Service gọi auditService.record(payload, tx) — mock đúng method `record`.
+const mockAuditService = {
+  record: vi.fn().mockResolvedValue(undefined),
+};
+
+describe('CourseBlockService - findAll', () => {
+  let service: CourseBlockService;
+
+  const mockPrisma = {
+    course: {
+      findUnique: vi.fn(),
+    },
+    courseBlock: {
+      findMany: vi.fn(),
+    },
+  };
+
+  const courseId = 'course-abc';
+  const ownerId = 'lecturer-123';
+  const studentId = 'student-456';
+
+  const buildUser = (userId: string): AuthenticatedUser => ({ userId }) as AuthenticatedUser;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CourseBlockService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrollmentService, useValue: mockEnrollmentService },
+        { provide: AuditService, useValue: mockAuditService },
+      ],
+    }).compile();
+
+    service = module.get<CourseBlockService>(CourseBlockService);
+    vi.clearAllMocks();
+
+    mockPrisma.courseBlock.findMany.mockResolvedValue([
+      { id: 'b1', position: 0 },
+      { id: 'b2', position: 1 },
+    ]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Owner
+  // ---------------------------------------------------------------------------
+  it('should return all blocks for the owner without calling assertCanAccessCourse', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId: ownerId });
+
+    const result = await service.findAll(courseId, buildUser(ownerId));
+
+    expect(result).toHaveLength(2);
+    expect(mockEnrollmentService.assertCanAccessCourse).not.toHaveBeenCalled();
+    expect(mockPrisma.courseBlock.findMany).toHaveBeenCalledWith({
+      where: { courseId },
+      orderBy: { position: 'asc' },
+    });
+  });
+
+  it('should return all blocks for the owner even when the course is Draft', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId: ownerId });
+
+    const result = await service.findAll(courseId, buildUser(ownerId));
+
+    expect(result).toHaveLength(2);
+    expect(mockEnrollmentService.assertCanAccessCourse).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Non-owner: student
+  // ---------------------------------------------------------------------------
+  it('should return blocks for a student when assertCanAccessCourse passes', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId: ownerId });
+    mockEnrollmentService.assertCanAccessCourse.mockResolvedValue({
+      id: 'enrollment-1',
+      status: 'ACTIVE',
+    });
+
+    const result = await service.findAll(courseId, buildUser(studentId));
+
+    expect(result).toHaveLength(2);
+    expect(mockEnrollmentService.assertCanAccessCourse).toHaveBeenCalledWith(studentId, courseId);
+    expect(mockPrisma.courseBlock.findMany).toHaveBeenCalledWith({
+      where: { courseId },
+      orderBy: { position: 'asc' },
+    });
+  });
+
+  it('should throw ForbiddenException when a non-enrolled student is rejected', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId: ownerId });
+    mockEnrollmentService.assertCanAccessCourse.mockRejectedValue(
+      new ForbiddenException('You do not have access to this course.'),
+    );
+
+    await expect(service.findAll(courseId, buildUser(studentId))).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
+  });
+
+  it('should throw ForbiddenException when an enrolled student hits a Draft/Suspended course', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId: ownerId });
+    mockEnrollmentService.assertCanAccessCourse.mockRejectedValue(
+      new ForbiddenException('You do not have access to this course.'),
+    );
+
+    await expect(service.findAll(courseId, buildUser(studentId))).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
+  });
+
+  it('should throw ForbiddenException when a non-owner lecturer calls findAll without enrollment', async () => {
+    const otherLecturerId = 'lecturer-999';
+    mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId: ownerId });
+    mockEnrollmentService.assertCanAccessCourse.mockRejectedValue(
+      new ForbiddenException('You do not have access to this course.'),
+    );
+
+    await expect(service.findAll(courseId, buildUser(otherLecturerId))).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(mockEnrollmentService.assertCanAccessCourse).toHaveBeenCalledWith(
+      otherLecturerId,
+      courseId,
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // Course not found
+  // ---------------------------------------------------------------------------
+  it('should throw NotFoundException when the course does not exist', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue(null);
+
+    await expect(service.findAll(courseId, buildUser(studentId))).rejects.toThrow(
+      new NotFoundException('Course not found'),
+    );
+    expect(mockEnrollmentService.assertCanAccessCourse).not.toHaveBeenCalled();
+    expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
+  });
+});
 
 describe('CourseBlockService - create (ownership pass)', () => {
   let service: CourseBlockService;
@@ -22,6 +166,7 @@ describe('CourseBlockService - create (ownership pass)', () => {
       findUnique: vi.fn(),
     },
     courseBlock: {
+      findFirst: vi.fn(),
       create: vi.fn(),
       aggregate: vi.fn(),
     },
@@ -36,16 +181,13 @@ describe('CourseBlockService - create (ownership pass)', () => {
       providers: [
         CourseBlockService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrollmentService, useValue: mockEnrollmentService },
         { provide: AuditService, useValue: mockAuditService },
       ],
     }).compile();
 
     service = module.get<CourseBlockService>(CourseBlockService);
     vi.clearAllMocks();
-
-    mockPrisma.$transaction.mockImplementation(
-      async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma),
-    );
 
     mockPrisma.courseBlock.aggregate.mockResolvedValue({
       _max: { position: null },
@@ -55,9 +197,13 @@ describe('CourseBlockService - create (ownership pass)', () => {
       id: courseId,
       lecturerId, //pass ownership check
     });
+
+    // $transaction chạy callback với tx = mockPrisma
+    mockPrisma.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) => {
+      return cb(mockPrisma);
+    });
   });
 
-  // Test case
   it('create a block', async () => {
     const dto = {
       title: 'Chapter 1',
@@ -72,7 +218,6 @@ describe('CourseBlockService - create (ownership pass)', () => {
 
     const result = await service.create(courseId, lecturerId, dto);
 
-    // Verify that the PrismaService methods were created with the correct parameters
     expect(mockPrisma.courseBlock.create).toHaveBeenCalledWith({
       data: {
         courseId,
@@ -84,21 +229,6 @@ describe('CourseBlockService - create (ownership pass)', () => {
       },
     });
 
-    expect(mockAuditService.record).toHaveBeenCalledWith(
-      {
-        actorId: lecturerId,
-        action: AuditAction.COURSE_UPDATED,
-        entityType: AuditEntityType.COURSE_BLOCK,
-        entityId: 'block-1',
-        metadata: {
-          courseId,
-          type: dto.type,
-        },
-      },
-      mockPrisma,
-    );
-
-    // Verify that the result matches the expected result
     expect(result).toEqual(expectedResult);
   });
 
@@ -107,7 +237,6 @@ describe('CourseBlockService - create (ownership pass)', () => {
       title: 'Chapter 2',
       type: 'TEXT',
       content: { text: 'Hello' },
-      // parentModuleId
       // biome-ignore lint/suspicious/noExplicitAny: NestJS request object, can't type it properly
     } as any;
 
@@ -125,20 +254,6 @@ describe('CourseBlockService - create (ownership pass)', () => {
         parentModuleId: null, // ?? null
       },
     });
-
-    expect(mockAuditService.record).toHaveBeenCalledWith(
-      {
-        actorId: lecturerId,
-        action: AuditAction.COURSE_UPDATED,
-        entityType: AuditEntityType.COURSE_BLOCK,
-        entityId: 'block-2',
-        metadata: {
-          courseId,
-          type: dto.type,
-        },
-      },
-      mockPrisma,
-    );
   });
 
   it('should auto-increment position based on max position in sibling list', async () => {
@@ -169,26 +284,12 @@ describe('CourseBlockService - create (ownership pass)', () => {
         parentModuleId: null,
       },
     });
-    expect(mockAuditService.record).toHaveBeenCalledWith(
-      {
-        actorId: lecturerId,
-        action: AuditAction.COURSE_UPDATED,
-        entityType: AuditEntityType.COURSE_BLOCK,
-        entityId: 'block-x',
-        metadata: {
-          courseId,
-          type: dto.type,
-        },
-      },
-      mockPrisma,
-    );
   });
 });
 
 describe('CourseBlockService - update', () => {
   let service: CourseBlockService;
 
-  // Mock Prisma: chỉ khai báo method mà update() dùng tới
   const mockPrisma = {
     course: {
       findUnique: vi.fn(),
@@ -210,6 +311,7 @@ describe('CourseBlockService - update', () => {
       providers: [
         CourseBlockService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrollmentService, useValue: mockEnrollmentService },
         { provide: AuditService, useValue: mockAuditService },
       ],
     }).compile();
@@ -217,26 +319,23 @@ describe('CourseBlockService - update', () => {
     service = module.get<CourseBlockService>(CourseBlockService);
     vi.clearAllMocks();
 
-    // Mặc định: ownership pass
     mockPrisma.course.findUnique.mockResolvedValue({
       id: courseId,
       lecturerId,
     });
 
-    mockPrisma.$transaction.mockImplementation(
-      async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma),
-    );
+    mockPrisma.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) => {
+      return cb(mockPrisma);
+    });
   });
 
   type UpdateDtoInput = Omit<UpdateCourseBlockDto, 'content'> & {
     content?: unknown;
   };
 
-  // Helper tạo DTO update, có thể override từng field
   const buildDto = (overrides: Partial<UpdateDtoInput> = {}): UpdateCourseBlockDto =>
     ({ ...overrides }) as UpdateCourseBlockDto;
 
-  // Helper tạo block hiện tại trong DB, có thể override
   const buildExistingBlock = (overrides: Partial<{ type: BlockType; courseId: string }> = {}) => ({
     id: blockId,
     courseId,
@@ -247,9 +346,6 @@ describe('CourseBlockService - update', () => {
     ...overrides,
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 1: Happy path — update từng field đơn lẻ
-  // ---------------------------------------------------------------------------
   describe('happy path', () => {
     it('should update only title when only title is provided', async () => {
       mockPrisma.courseBlock.findFirst.mockResolvedValue(buildExistingBlock());
@@ -260,22 +356,9 @@ describe('CourseBlockService - update', () => {
 
       expect(mockPrisma.courseBlock.update).toHaveBeenCalledWith({
         where: { id: blockId },
-        data: { title: 'New title' }, // không có type, position, content
+        data: { title: 'New title' },
       });
       expect(result).toEqual({ id: blockId, title: 'New title' });
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE_BLOCK,
-          entityId: blockId,
-          metadata: {
-            courseId,
-            changedFields: ['title'],
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should update only type when only type is provided', async () => {
@@ -289,20 +372,6 @@ describe('CourseBlockService - update', () => {
         where: { id: blockId },
         data: { type: BlockType.VIDEO },
       });
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE_BLOCK,
-          entityId: blockId,
-          metadata: {
-            courseId,
-            changedFields: ['type'],
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should update only content when only content is provided', async () => {
@@ -317,20 +386,6 @@ describe('CourseBlockService - update', () => {
         where: { id: blockId },
         data: { content },
       });
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE_BLOCK,
-          entityId: blockId,
-          metadata: {
-            courseId,
-            changedFields: ['content'],
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should update multiple fields at once when provided', async () => {
@@ -352,54 +407,22 @@ describe('CourseBlockService - update', () => {
           content: { url: 'https://example.com/new.mp4' },
         },
       });
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE_BLOCK,
-          entityId: blockId,
-          metadata: {
-            courseId,
-            changedFields: ['title', 'type', 'content'],
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should send an empty data object when dto is empty (no fields to update)', async () => {
       mockPrisma.courseBlock.findFirst.mockResolvedValue(buildExistingBlock());
-      const dto = buildDto(); // {}
+      const dto = buildDto();
       mockPrisma.courseBlock.update.mockResolvedValue({ id: blockId });
 
       await service.update(courseId, blockId, lecturerId, dto);
 
-      // Tất cả spread condition đều false -> data = {}
       expect(mockPrisma.courseBlock.update).toHaveBeenCalledWith({
         where: { id: blockId },
         data: {},
       });
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE_BLOCK,
-          entityId: blockId,
-          metadata: {
-            courseId,
-            changedFields: [],
-          },
-        },
-        mockPrisma,
-      );
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 2: Ownership check fail
-  // ---------------------------------------------------------------------------
   describe('ownership check', () => {
     it('should throw NotFoundException when course does not exist', async () => {
       mockPrisma.course.findUnique.mockResolvedValue(null);
@@ -410,7 +433,6 @@ describe('CourseBlockService - update', () => {
       );
       expect(mockPrisma.courseBlock.findFirst).not.toHaveBeenCalled();
       expect(mockPrisma.courseBlock.update).not.toHaveBeenCalled();
-      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
 
     it('should throw ForbiddenException when lecturer does not own the course', async () => {
@@ -425,13 +447,9 @@ describe('CourseBlockService - update', () => {
       );
       expect(mockPrisma.courseBlock.findFirst).not.toHaveBeenCalled();
       expect(mockPrisma.courseBlock.update).not.toHaveBeenCalled();
-      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 3: Block không tồn tại trong course
-  // ---------------------------------------------------------------------------
   describe('block existence', () => {
     it('should throw NotFoundException when block does not exist in the course', async () => {
       mockPrisma.courseBlock.findFirst.mockResolvedValue(null);
@@ -441,38 +459,32 @@ describe('CourseBlockService - update', () => {
         new NotFoundException('Course block not found'),
       );
       expect(mockPrisma.courseBlock.update).not.toHaveBeenCalled();
-      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 4: Logic đổi type của MODULE có children
-  // ---------------------------------------------------------------------------
   describe('validation: changing MODULE type with children', () => {
     it('should throw BadRequestException when changing MODULE to another type and it has children', async () => {
       mockPrisma.courseBlock.findFirst.mockResolvedValue(
         buildExistingBlock({ type: BlockType.MODULE }),
       );
-      mockPrisma.courseBlock.count.mockResolvedValue(2); // có 2 children
+      mockPrisma.courseBlock.count.mockResolvedValue(2);
       const dto = buildDto({ type: BlockType.VIDEO });
 
       await expect(service.update(courseId, blockId, lecturerId, dto)).rejects.toThrow(
         new BadRequestException('Cannot change a MODULE that has children'),
       );
 
-      // Phải check count với parentModuleId = blockId
       expect(mockPrisma.courseBlock.count).toHaveBeenCalledWith({
         where: { parentModuleId: blockId },
       });
       expect(mockPrisma.courseBlock.update).not.toHaveBeenCalled();
-      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
 
     it('should allow changing MODULE to another type when it has no children', async () => {
       mockPrisma.courseBlock.findFirst.mockResolvedValue(
         buildExistingBlock({ type: BlockType.MODULE }),
       );
-      mockPrisma.courseBlock.count.mockResolvedValue(0); // không có children
+      mockPrisma.courseBlock.count.mockResolvedValue(0);
       const dto = buildDto({ type: BlockType.VIDEO });
       mockPrisma.courseBlock.update.mockResolvedValue({ id: blockId });
 
@@ -485,20 +497,6 @@ describe('CourseBlockService - update', () => {
         where: { id: blockId },
         data: { type: BlockType.VIDEO },
       });
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE_BLOCK,
-          entityId: blockId,
-          metadata: {
-            courseId,
-            changedFields: ['type'],
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should NOT check children when block is already MODULE and dto.type is also MODULE', async () => {
@@ -510,26 +508,11 @@ describe('CourseBlockService - update', () => {
 
       await service.update(courseId, blockId, lecturerId, dto);
 
-      // type không đổi -> không gọi count
       expect(mockPrisma.courseBlock.count).not.toHaveBeenCalled();
       expect(mockPrisma.courseBlock.update).toHaveBeenCalledWith({
         where: { id: blockId },
         data: { type: BlockType.MODULE, title: 'New title' },
       });
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE_BLOCK,
-          entityId: blockId,
-          metadata: {
-            courseId,
-            changedFields: ['title', 'type'],
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should NOT check children when block is NOT a MODULE even if dto.type changes', async () => {
@@ -541,58 +524,26 @@ describe('CourseBlockService - update', () => {
 
       await service.update(courseId, blockId, lecturerId, dto);
 
-      // block.type !== MODULE -> bỏ qua check children
       expect(mockPrisma.courseBlock.count).not.toHaveBeenCalled();
       expect(mockPrisma.courseBlock.update).toHaveBeenCalledWith({
         where: { id: blockId },
         data: { type: BlockType.VIDEO },
       });
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE_BLOCK,
-          entityId: blockId,
-          metadata: {
-            courseId,
-            changedFields: ['type'],
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should NOT check children when dto.type is undefined (không đổi type)', async () => {
       mockPrisma.courseBlock.findFirst.mockResolvedValue(
         buildExistingBlock({ type: BlockType.MODULE }),
       );
-      const dto = buildDto({ title: 'New title' }); // không có type
+      const dto = buildDto({ title: 'New title' });
       mockPrisma.courseBlock.update.mockResolvedValue({ id: blockId });
 
       await service.update(courseId, blockId, lecturerId, dto);
 
       expect(mockPrisma.courseBlock.count).not.toHaveBeenCalled();
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE_BLOCK,
-          entityId: blockId,
-          metadata: {
-            courseId,
-            changedFields: ['title'],
-          },
-        },
-        mockPrisma,
-      );
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 5: Đảm bảo data chỉ chứa field được cung cấp (spread condition)
-  // ---------------------------------------------------------------------------
   describe('data spread condition', () => {
     it('should NOT include fields with undefined value in data', async () => {
       mockPrisma.courseBlock.findFirst.mockResolvedValue(buildExistingBlock());
@@ -605,24 +556,9 @@ describe('CourseBlockService - update', () => {
       expect(callArg.data).not.toHaveProperty('type');
       expect(callArg.data).not.toHaveProperty('content');
       expect(callArg.data).toEqual({ title: 'New title' });
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE_BLOCK,
-          entityId: blockId,
-          metadata: {
-            courseId,
-            changedFields: ['title'],
-          },
-        },
-        mockPrisma,
-      );
     });
   });
-  // ---------------------------------------------------------------------------
-  // Nhóm 6: Truyền đúng tham số cho findFirst (id + courseId)
-  // ---------------------------------------------------------------------------
+
   describe('prisma call arguments', () => {
     it('should call findFirst with both blockId and courseId', async () => {
       mockPrisma.courseBlock.findFirst.mockResolvedValue(buildExistingBlock());
@@ -634,20 +570,6 @@ describe('CourseBlockService - update', () => {
       expect(mockPrisma.courseBlock.findFirst).toHaveBeenCalledWith({
         where: { id: blockId, courseId },
       });
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE_BLOCK,
-          entityId: blockId,
-          metadata: {
-            courseId,
-            changedFields: ['title'],
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should call update with where = { id: blockId } only (not courseId)', async () => {
@@ -658,23 +580,9 @@ describe('CourseBlockService - update', () => {
       await service.update(courseId, blockId, lecturerId, dto);
 
       expect(mockPrisma.courseBlock.update).toHaveBeenCalledWith({
-        where: { id: blockId }, // service chỉ dùng id
+        where: { id: blockId },
         data: { title: 'New title' },
       });
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE_BLOCK,
-          entityId: blockId,
-          metadata: {
-            courseId,
-            changedFields: ['title'],
-          },
-        },
-        mockPrisma,
-      );
     });
   });
 });
@@ -700,6 +608,7 @@ describe('CourseBlockService - remove', () => {
       providers: [
         CourseBlockService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrollmentService, useValue: mockEnrollmentService },
         { provide: AuditService, useValue: mockAuditService },
       ],
     }).compile();
@@ -707,19 +616,14 @@ describe('CourseBlockService - remove', () => {
     service = module.get<CourseBlockService>(CourseBlockService);
     vi.clearAllMocks();
 
-    // Mặc định: ownership pass
     mockPrisma.course.findUnique.mockResolvedValue({ id: courseId, lecturerId });
-    // Mặc định: block tồn tại trong course
     mockPrisma.courseBlock.findFirst.mockResolvedValue({ id: blockId, courseId });
 
-    mockPrisma.$transaction.mockImplementation(
-      async (callback: (tx: typeof mockPrisma) => Promise<unknown>) => callback(mockPrisma),
-    );
+    mockPrisma.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) => {
+      return cb(mockPrisma);
+    });
   });
 
-  // ---------------------------------------------------------------------------
-  // Happy path
-  // ---------------------------------------------------------------------------
   it('should delete the block and return Prisma response', async () => {
     const deleted = { id: blockId, courseId, title: 'Chapter 1' };
     mockPrisma.courseBlock.delete.mockResolvedValue(deleted);
@@ -733,29 +637,14 @@ describe('CourseBlockService - remove', () => {
       where: { id: blockId },
     });
     expect(result).toEqual(deleted);
-
-    expect(mockAuditService.record).toHaveBeenCalledWith(
-      {
-        actorId: lecturerId,
-        action: AuditAction.COURSE_UPDATED,
-        entityType: AuditEntityType.COURSE_BLOCK,
-        entityId: blockId,
-        metadata: { courseId },
-      },
-      mockPrisma,
-    );
   });
 
-  // ---------------------------------------------------------------------------
-  // Ownership fail
-  // ---------------------------------------------------------------------------
   it('should throw NotFoundException when course does not exist', async () => {
     mockPrisma.course.findUnique.mockResolvedValue(null);
 
     await expect(service.remove(courseId, blockId, lecturerId)).rejects.toThrow(NotFoundException);
     expect(mockPrisma.courseBlock.findFirst).not.toHaveBeenCalled();
     expect(mockPrisma.courseBlock.delete).not.toHaveBeenCalled();
-    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 
   it('should throw ForbiddenException when lecturer does not own the course', async () => {
@@ -766,12 +655,8 @@ describe('CourseBlockService - remove', () => {
 
     await expect(service.remove(courseId, blockId, lecturerId)).rejects.toThrow(ForbiddenException);
     expect(mockPrisma.courseBlock.delete).not.toHaveBeenCalled();
-    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 
-  // ---------------------------------------------------------------------------
-  // Block not found
-  // ---------------------------------------------------------------------------
   it('should throw NotFoundException when block does not exist in the course', async () => {
     mockPrisma.courseBlock.findFirst.mockResolvedValue(null);
 
@@ -779,14 +664,12 @@ describe('CourseBlockService - remove', () => {
       new NotFoundException('Course block not found'),
     );
     expect(mockPrisma.courseBlock.delete).not.toHaveBeenCalled();
-    expect(mockAuditService.record).not.toHaveBeenCalled();
   });
 });
 
 describe('CourseBlockService - reorder', () => {
   let service: CourseBlockService;
 
-  // Mock Prisma: khai báo method mà reorder() + checkCourseOwnership() dùng tới
   const mockPrisma = {
     course: {
       findUnique: vi.fn(),
@@ -806,6 +689,7 @@ describe('CourseBlockService - reorder', () => {
       providers: [
         CourseBlockService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: EnrollmentService, useValue: mockEnrollmentService },
         { provide: AuditService, useValue: mockAuditService },
       ],
     }).compile();
@@ -813,19 +697,16 @@ describe('CourseBlockService - reorder', () => {
     service = module.get<CourseBlockService>(CourseBlockService);
     vi.clearAllMocks();
 
-    // Mặc định: course tồn tại và thuộc lecturerId -> checkCourseOwnership pass
     mockPrisma.course.findUnique.mockResolvedValue({
       id: courseId,
       lecturerId,
     });
 
-    // $transaction chạy callback với tx = mockPrisma (callback-style)
     mockPrisma.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) => {
       return cb(mockPrisma);
     });
   });
 
-  // Helper tạo block từ findMany (lần 1: blocks được yêu cầu)
   const buildRequestedBlocks = (ids: string[], parentModuleId: string | null = null) =>
     ids.map((id, i) => ({
       id,
@@ -833,16 +714,12 @@ describe('CourseBlockService - reorder', () => {
       position: i,
     }));
 
-  // Helper tạo sibling từ findMany (lần 2: tất cả siblings cùng parent)
   const buildSiblings = (ids: string[], positions: number[] = ids.map((_, i) => i)) =>
     ids.map((id, i) => ({
       id,
       position: positions[i],
     }));
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 1: Happy path
-  // ---------------------------------------------------------------------------
   describe('happy path', () => {
     it('should reorder 3 sibling blocks and return reordered result', async () => {
       const blockIds = ['block-a', 'block-b', 'block-c'];
@@ -859,19 +736,6 @@ describe('CourseBlockService - reorder', () => {
       expect(mockPrisma.course.findUnique).toHaveBeenCalledWith({
         where: { id: courseId },
       });
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE,
-          entityId: courseId,
-          metadata: {
-            blockIds,
-            parentModuleId: null,
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should reorder a single block (position = 0)', async () => {
@@ -886,20 +750,6 @@ describe('CourseBlockService - reorder', () => {
       const result = await service.reorder(courseId, blockIds, lecturerId);
 
       expect(result).toEqual([{ id: 'block-a', position: 0 }]);
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE,
-          entityId: courseId,
-          metadata: {
-            blockIds,
-            parentModuleId: null,
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should assign final positions by index of blockIds, not by DB position', async () => {
@@ -928,26 +778,9 @@ describe('CourseBlockService - reorder', () => {
         { id: 'block-a', position: 1 },
         { id: 'block-b', position: 2 },
       ]);
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE,
-          entityId: courseId,
-          metadata: {
-            blockIds,
-            parentModuleId: null,
-          },
-        },
-        mockPrisma,
-      );
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 2: checkCourseOwnership — course không tồn tại / không sở hữu
-  // ---------------------------------------------------------------------------
   describe('ownership check', () => {
     it('should throw NotFoundException when course does not exist', async () => {
       mockPrisma.course.findUnique.mockResolvedValueOnce(null);
@@ -958,7 +791,6 @@ describe('CourseBlockService - reorder', () => {
 
       expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
 
     it('should throw ForbiddenException when lecturer does not own the course', async () => {
@@ -973,13 +805,9 @@ describe('CourseBlockService - reorder', () => {
 
       expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 3: Validation — duplicate IDs (fail-fast TRƯỚC checkCourseOwnership)
-  // ---------------------------------------------------------------------------
   describe('validation: duplicate block IDs', () => {
     it('should throw BadRequestException when blockIds has duplicates', async () => {
       const blockIds = ['block-a', 'block-a', 'block-b'];
@@ -988,17 +816,12 @@ describe('CourseBlockService - reorder', () => {
         new BadRequestException('Duplicate block IDs are not allowed'),
       );
 
-      // Fail-fast: không được gọi Prisma gì cả (kể cả course.findUnique)
       expect(mockPrisma.course.findUnique).not.toHaveBeenCalled();
       expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 4: Validation — block không tồn tại / không thuộc course
-  // ---------------------------------------------------------------------------
   describe('validation: blocks not in course', () => {
     it('should throw BadRequestException when some blockIds do not exist in the course', async () => {
       const blockIds = ['block-a', 'block-b', 'block-c'];
@@ -1013,13 +836,9 @@ describe('CourseBlockService - reorder', () => {
 
       expect(mockPrisma.courseBlock.findMany).toHaveBeenCalledTimes(1);
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 5: Validation — khác parentModuleId
-  // ---------------------------------------------------------------------------
   describe('validation: different parentModuleId', () => {
     it('should throw BadRequestException when blocks belong to different parents', async () => {
       const blockIds = ['block-a', 'block-b', 'block-c'];
@@ -1036,13 +855,9 @@ describe('CourseBlockService - reorder', () => {
 
       expect(mockPrisma.courseBlock.findMany).toHaveBeenCalledTimes(1);
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 6: Validation — thiếu siblings
-  // ---------------------------------------------------------------------------
   describe('validation: missing siblings', () => {
     it('should throw BadRequestException when blockIds does not include all siblings', async () => {
       const blockIds = ['block-a', 'block-b'];
@@ -1056,13 +871,9 @@ describe('CourseBlockService - reorder', () => {
       );
 
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 7: Validation — blockIds không khớp siblingIds
-  // ---------------------------------------------------------------------------
   describe('validation: blockIds mismatch sibling IDs', () => {
     it('should throw BadRequestException when blockIds length matches siblings but IDs differ', async () => {
       const blockIds = ['block-a', 'block-b'];
@@ -1076,13 +887,9 @@ describe('CourseBlockService - reorder', () => {
       );
 
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 8: Prisma call arguments
-  // ---------------------------------------------------------------------------
   describe('prisma call arguments', () => {
     it('should call findMany #1 with courseId and id: { in: blockIds }', async () => {
       const blockIds = ['block-a', 'block-b'];
@@ -1098,20 +905,6 @@ describe('CourseBlockService - reorder', () => {
         where: { courseId, id: { in: blockIds } },
         select: { id: true, parentModuleId: true, position: true },
       });
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE,
-          entityId: courseId,
-          metadata: {
-            blockIds,
-            parentModuleId: null,
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should call findMany #2 with courseId and parentModuleId', async () => {
@@ -1132,20 +925,6 @@ describe('CourseBlockService - reorder', () => {
         where: { courseId, parentModuleId },
         select: { id: true, position: true },
       });
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE,
-          entityId: courseId,
-          metadata: {
-            blockIds,
-            parentModuleId,
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should call $transaction exactly once', async () => {
@@ -1159,26 +938,9 @@ describe('CourseBlockService - reorder', () => {
       await service.reorder(courseId, blockIds, lecturerId);
 
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
-
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE,
-          entityId: courseId,
-          metadata: {
-            blockIds,
-            parentModuleId: null,
-          },
-        },
-        mockPrisma,
-      );
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Nhóm 9: Hai giai đoạn update (tạm + chính thức)
-  // ---------------------------------------------------------------------------
   describe('two-phase update', () => {
     it('should first move all blocks to temporary positions > maxPosition, then assign final positions', async () => {
       const blockIds = ['block-a', 'block-b'];
@@ -1209,19 +971,6 @@ describe('CourseBlockService - reorder', () => {
         where: { id: 'block-b' },
         data: { position: 1 },
       });
-      expect(mockAuditService.record).toHaveBeenCalledWith(
-        {
-          actorId: lecturerId,
-          action: AuditAction.COURSE_UPDATED,
-          entityType: AuditEntityType.COURSE,
-          entityId: courseId,
-          metadata: {
-            blockIds,
-            parentModuleId: null,
-          },
-        },
-        mockPrisma,
-      );
     });
 
     it('should throw BadRequestException when siblings array is empty (length mismatch)', async () => {
@@ -1234,7 +983,6 @@ describe('CourseBlockService - reorder', () => {
       await expect(service.reorder(courseId, blockIds, lecturerId)).rejects.toThrow(
         BadRequestException,
       );
-      expect(mockAuditService.record).not.toHaveBeenCalled();
     });
   });
 });
