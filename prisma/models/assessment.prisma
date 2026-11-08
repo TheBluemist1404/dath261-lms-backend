@@ -29,6 +29,10 @@ model QuizAttempt {
   submittedAt DateTime? @map("submitted_at")
   gradedAt DateTime? @map("graded_at")
 
+  // === LATE FLAG (added for quiz module, AC-5) ===
+  // True when submittedAt > QuizConfig.deadline AND QuizConfig.allowLate = true.
+  isLate Boolean @default(false) @map("is_late")
+
   @@unique([enrollmentId, courseBlockId, attemptNumber])
   @@index([enrollmentId])
   @@index([courseBlockId])
