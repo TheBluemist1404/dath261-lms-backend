@@ -191,6 +191,7 @@ describe('AdminService', () => {
         AccountStatus.SUSPENDED,
         adminId,
         transaction,
+        undefined,
       );
 
       expect(transaction.authSession.updateMany).toHaveBeenCalledWith({
@@ -226,6 +227,7 @@ describe('AdminService', () => {
         AccountStatus.ACTIVE,
         adminId,
         transaction,
+        undefined,
       );
 
       expect(transaction.authSession.updateMany).not.toHaveBeenCalled();

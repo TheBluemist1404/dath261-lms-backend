@@ -87,7 +87,7 @@ export class UserService {
     reason?: string,
   ): Promise<PublicUser> {
     if (tx) {
-      return this.updateStatusInTransaction(tx, id, status, actorId);
+      return this.updateStatusInTransaction(tx, id, status, actorId, reason);
     }
 
     return this.prisma.$transaction((transaction) =>
