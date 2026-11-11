@@ -555,6 +555,7 @@ describe('AdminService', () => {
         id: 'course-1',
         title: 'Introduction to NestJS',
         isSuspended: false,
+        status: CourseStatus.PUBLISHED,
       });
 
       const result = await service.listReports({});
