@@ -15,7 +15,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main.js",
+    "start:prod": "node dist/src/main.js",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint .",
     "check": "biome check .",
@@ -31,6 +31,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed:dev": "node scripts/seed-dev.mjs",
+    "db:reset:dev": "node scripts/reset-dev.mjs",
+    "db:check-migrations": "prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/ --exit-code",
     "ci": "pnpm check && pnpm prisma:validate && pnpm typecheck && pnpm test && pnpm test:e2e && pnpm build",
     "postinstall": "prisma generate",
     "prepare": "husky"

@@ -55,3 +55,32 @@ jobs:
 
       - name: Quality gate
         run: pnpm run ci
+
+      - name: Check migrations match the schema
+        env:
+          SHADOW_DATABASE_URL: postgresql://test:test@localhost:5432/datn261_shadow
+        run: |
+          PGPASSWORD=test psql -h localhost -U test -d datn261_test -c 'CREATE DATABASE datn261_shadow'
+          pnpm db:check-migrations
+
+      - name: Smoke test the production build
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/datn261_smoke
+          PORT: 3001
+        run: |
+          PGPASSWORD=test psql -h localhost -U test -d datn261_test -c 'CREATE DATABASE datn261_smoke'
+          pnpm db:deploy
+          pnpm db:seed:dev
+          NODE_ENV=production pnpm start:prod > start-prod.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            curl -sf http://localhost:3001/health && break
+            sleep 1
+          done
+          curl -sf http://localhost:3001/health
+          curl -sf -X POST http://localhost:3001/api/auth/login \
+            -H 'content-type: application/json' \
+            -d '{"email":"admin@dath261.dev","password":"password123"}' > /dev/null
+
+      - name: Show the production server log
+        if: failure()
+        run: cat start-prod.log || true
