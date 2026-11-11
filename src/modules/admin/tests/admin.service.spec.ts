@@ -881,5 +881,223 @@ describe('AdminService', () => {
       expect(result.status).toBe(ReportStatus.ACTION_TAKEN);
       expect(result.target.available).toBe(true);
     });
+
+    describe('resolveTarget - MESSAGE availability', () => {
+      const setupMessageReport = () => {
+        mockPrisma.report.count.mockResolvedValue(1);
+        mockPrisma.report.findMany.mockResolvedValue([
+          buildReport({
+            targetType: ReportTargetType.MESSAGE,
+            targetId: 'message-1',
+          }),
+        ]);
+      };
+
+      const buildMessage = (pageArchivedAt: Date | null, workspaceArchivedAt: Date | null) => ({
+        id: 'message-1',
+        sender: {
+          firstName: 'Mai',
+          lastName: 'Tran',
+        },
+        page: {
+          title: 'Project Discussion',
+          archivedAt: pageArchivedAt,
+          workspace: {
+            name: 'Collaborative Workspace',
+            archivedAt: workspaceArchivedAt,
+          },
+        },
+      });
+
+      it('should mark a message as available when its page and workspace are active', async () => {
+        setupMessageReport();
+
+        mockPrisma.message.findUnique.mockResolvedValue(buildMessage(null, null));
+
+        const result = await service.listReports({});
+
+        expect(result.items[0].target.available).toBe(true);
+
+        expect(mockPrisma.message.findUnique).toHaveBeenCalledWith({
+          where: { id: 'message-1' },
+          select: {
+            id: true,
+            sender: {
+              select: {
+                firstName: true,
+                lastName: true,
+              },
+            },
+            page: {
+              select: {
+                title: true,
+                archivedAt: true,
+                workspace: {
+                  select: {
+                    name: true,
+                    archivedAt: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+      });
+
+      it('should mark a message as unavailable when its page is archived', async () => {
+        setupMessageReport();
+
+        mockPrisma.message.findUnique.mockResolvedValue(
+          buildMessage(new Date('2026-11-10T10:00:00.000Z'), null),
+        );
+
+        const result = await service.listReports({});
+
+        expect(result.items[0].target.available).toBe(false);
+      });
+
+      it('should mark a message as unavailable when its workspace is archived', async () => {
+        setupMessageReport();
+
+        mockPrisma.message.findUnique.mockResolvedValue(
+          buildMessage(null, new Date('2026-11-10T10:00:00.000Z')),
+        );
+
+        const result = await service.listReports({});
+
+        expect(result.items[0].target.available).toBe(false);
+      });
+    });
+
+    describe('resolveTarget - USER availability', () => {
+      const setupUserReport = () => {
+        mockPrisma.report.count.mockResolvedValue(1);
+        mockPrisma.report.findMany.mockResolvedValue([
+          buildReport({
+            targetType: ReportTargetType.USER,
+            targetId: 'user-1',
+          }),
+        ]);
+      };
+
+      const buildUser = (status: AccountStatus) => ({
+        id: 'user-1',
+        email: 'target@example.com',
+        firstName: 'Target',
+        lastName: 'User',
+        status,
+      });
+
+      it('should mark an ACTIVE user as available', async () => {
+        setupUserReport();
+
+        mockPrisma.user.findUnique.mockResolvedValue(buildUser(AccountStatus.ACTIVE));
+
+        const result = await service.listReports({});
+
+        expect(result.items[0].target).toEqual({
+          type: ReportTargetType.USER,
+          id: 'user-1',
+          name: 'Target User',
+          available: true,
+        });
+
+        expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+          where: { id: 'user-1' },
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            status: true,
+          },
+        });
+      });
+
+      it('should mark a SUSPENDED user as unavailable', async () => {
+        setupUserReport();
+
+        mockPrisma.user.findUnique.mockResolvedValue(buildUser(AccountStatus.SUSPENDED));
+
+        const result = await service.listReports({});
+
+        expect(result.items[0].target).toEqual({
+          type: ReportTargetType.USER,
+          id: 'user-1',
+          name: 'Target User',
+          available: false,
+        });
+      });
+    });
+
+    describe('resolveTarget - COURSE availability', () => {
+      const setupCourseReport = () => {
+        mockPrisma.report.count.mockResolvedValue(1);
+        mockPrisma.report.findMany.mockResolvedValue([
+          buildReport({
+            targetType: ReportTargetType.COURSE,
+            targetId: 'course-1',
+          }),
+        ]);
+      };
+
+      const buildCourseTarget = (status: CourseStatus, isSuspended: boolean) => ({
+        id: 'course-1',
+        title: 'Introduction to NestJS',
+        status,
+        isSuspended,
+      });
+
+      it('should mark a PUBLISHED non-suspended course as available', async () => {
+        setupCourseReport();
+
+        mockPrisma.course.findUnique.mockResolvedValue(
+          buildCourseTarget(CourseStatus.PUBLISHED, false),
+        );
+
+        const result = await service.listReports({});
+
+        expect(result.items[0].target).toEqual({
+          type: ReportTargetType.COURSE,
+          id: 'course-1',
+          name: 'Introduction to NestJS',
+          available: true,
+        });
+
+        expect(mockPrisma.course.findUnique).toHaveBeenCalledWith({
+          where: { id: 'course-1' },
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            isSuspended: true,
+          },
+        });
+      });
+
+      it('should mark a suspended PUBLISHED course as unavailable', async () => {
+        setupCourseReport();
+
+        mockPrisma.course.findUnique.mockResolvedValue(
+          buildCourseTarget(CourseStatus.PUBLISHED, true),
+        );
+
+        const result = await service.listReports({});
+
+        expect(result.items[0].target.available).toBe(false);
+      });
+
+      it('should mark a non-suspended DRAFT course as unavailable', async () => {
+        setupCourseReport();
+
+        mockPrisma.course.findUnique.mockResolvedValue(
+          buildCourseTarget(CourseStatus.DRAFT, false),
+        );
+
+        const result = await service.listReports({});
+
+        expect(result.items[0].target.available).toBe(false);
+      });
+    });
   });
 });

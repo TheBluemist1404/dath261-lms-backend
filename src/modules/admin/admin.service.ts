@@ -9,6 +9,7 @@ import {
   AccountStatus,
   AuditAction,
   AuditEntityType,
+  CourseStatus,
   EnrollmentStatus,
   ReportStatus,
   ReportTargetType,
@@ -483,6 +484,18 @@ export class AdminService {
                 lastName: true,
               },
             },
+            page: {
+              select: {
+                title: true,
+                archivedAt: true,
+                workspace: {
+                  select: {
+                    name: true,
+                    archivedAt: true,
+                  },
+                },
+              },
+            },
           },
         });
 
@@ -499,7 +512,7 @@ export class AdminService {
           type: targetType,
           id: message.id,
           name: `Message by ${this.getDisplayName(message.sender)}`,
-          available: true,
+          available: !message.page.archivedAt && !message.page.workspace.archivedAt,
         };
       }
 
@@ -511,6 +524,7 @@ export class AdminService {
             email: true,
             firstName: true,
             lastName: true,
+            status: true,
           },
         });
 
@@ -527,7 +541,7 @@ export class AdminService {
           type: targetType,
           id: user.id,
           name: this.getDisplayName(user),
-          available: true,
+          available: user.status === AccountStatus.ACTIVE,
         };
       }
 
@@ -537,6 +551,8 @@ export class AdminService {
           select: {
             id: true,
             title: true,
+            status: true,
+            isSuspended: true,
           },
         });
 
@@ -553,7 +569,7 @@ export class AdminService {
           type: targetType,
           id: course.id,
           name: course.title,
-          available: true,
+          available: !course.isSuspended && course.status === CourseStatus.PUBLISHED,
         };
       }
 
