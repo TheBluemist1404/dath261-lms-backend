@@ -768,6 +768,7 @@ describe('AdminService', () => {
           id: targetId,
           title: 'Course title',
           isSuspended: false,
+          status: CourseStatus.PUBLISHED,
         });
       }
 

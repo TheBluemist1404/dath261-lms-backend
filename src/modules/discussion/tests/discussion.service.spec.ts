@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { vi } from 'vitest';
-import { ReportTargetType } from '../../../generated/prisma/enums.js';
+import { CourseStatus, ReportTargetType } from '../../../generated/prisma/enums.js';
 import { DiscussionService } from '../discussion.service.js';
 import type { CreateReportDto } from '../dto/create-report.dto.js';
 
@@ -143,6 +143,8 @@ describe('DiscussionService - additional report targets', () => {
     prisma.course.findUnique.mockResolvedValue({
       id: 'course-1',
       lecturerId: 'another-lecturer',
+      status: CourseStatus.PUBLISHED,
+      isSuspended: false,
     });
 
     const result = await service.report(reporterId, buildDto(ReportTargetType.COURSE, 'course-1'));
@@ -152,6 +154,8 @@ describe('DiscussionService - additional report targets', () => {
       select: {
         id: true,
         lecturerId: true,
+        status: true,
+        isSuspended: true,
       },
     });
 
@@ -185,6 +189,8 @@ describe('DiscussionService - additional report targets', () => {
       target: {
         id: 'owned-course',
         lecturerId: reporterId,
+        status: CourseStatus.PUBLISHED,
+        isSuspended: false,
       },
       expectedError: BadRequestException,
     },
@@ -196,5 +202,60 @@ describe('DiscussionService - additional report targets', () => {
     ).rejects.toThrow(expectedError);
 
     expect(prisma.report.create).not.toHaveBeenCalled();
+  });
+
+  describe('COURSE report visibility', () => {
+    const buildCourse = (status: CourseStatus, isSuspended: boolean) => ({
+      id: 'course-1',
+      lecturerId: 'another-lecturer',
+      status,
+      isSuspended,
+    });
+
+    it('should reject reporting a DRAFT course with 404', async () => {
+      prisma.course.findUnique.mockResolvedValue(buildCourse(CourseStatus.DRAFT, false));
+
+      await expect(
+        service.report(reporterId, buildDto(ReportTargetType.COURSE, 'course-1')),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(prisma.report.create).not.toHaveBeenCalled();
+    });
+
+    it('should reject reporting a suspended PUBLISHED course with 404', async () => {
+      prisma.course.findUnique.mockResolvedValue(buildCourse(CourseStatus.PUBLISHED, true));
+
+      await expect(
+        service.report(reporterId, buildDto(ReportTargetType.COURSE, 'course-1')),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(prisma.report.create).not.toHaveBeenCalled();
+    });
+
+    it('should reject reporting a suspended DRAFT course with 404', async () => {
+      prisma.course.findUnique.mockResolvedValue(buildCourse(CourseStatus.DRAFT, true));
+
+      await expect(
+        service.report(reporterId, buildDto(ReportTargetType.COURSE, 'course-1')),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(prisma.report.create).not.toHaveBeenCalled();
+    });
+
+    it('should include visibility fields in the course lookup', async () => {
+      prisma.course.findUnique.mockResolvedValue(buildCourse(CourseStatus.PUBLISHED, false));
+
+      await service.report(reporterId, buildDto(ReportTargetType.COURSE, 'course-1'));
+
+      expect(prisma.course.findUnique).toHaveBeenCalledWith({
+        where: { id: 'course-1' },
+        select: {
+          id: true,
+          lecturerId: true,
+          status: true,
+          isSuspended: true,
+        },
+      });
+    });
   });
 });

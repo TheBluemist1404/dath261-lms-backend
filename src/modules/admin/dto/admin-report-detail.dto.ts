@@ -4,6 +4,7 @@ import { AdminReportItemDto } from './admin-report-item.dto.js';
 export const ADMIN_REPORT_HISTORY_ACTIONS = [
   'RECEIVED',
   'DISMISSED',
+  'ACTION_TAKEN',
   'COURSE_SUSPENDED',
   'USER_SUSPENDED',
 ] as const;

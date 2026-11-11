@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ReportTargetType, WorkspaceType } from '../../generated/prisma/enums.js';
+import { CourseStatus, ReportTargetType, WorkspaceType } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { CollaborationService } from '../collaboration/collaboration.service.js';
 import { type PageAccess, PagesService } from '../pages/pages.service.js';
@@ -133,10 +133,12 @@ export class DiscussionService {
           select: {
             id: true,
             lecturerId: true,
+            status: true,
+            isSuspended: true,
           },
         });
 
-        if (!course) {
+        if (!course || course.status !== CourseStatus.PUBLISHED || course.isSuspended) {
           throw new NotFoundException('Course not found');
         }
 

@@ -654,10 +654,13 @@ export class AdminService {
 
     if (
       entry.entityType === AuditEntityType.REPORT &&
-      entry.action === AuditAction.REPORT_REVIEWED &&
-      metadata.status === ReportStatus.DISMISSED
+      entry.action === AuditAction.REPORT_REVIEWED
     ) {
-      action = 'DISMISSED';
+      if (metadata.status === ReportStatus.DISMISSED) {
+        action = 'DISMISSED';
+      } else if (metadata.status === ReportStatus.ACTION_TAKEN) {
+        action = 'ACTION_TAKEN';
+      }
     }
 
     if (
