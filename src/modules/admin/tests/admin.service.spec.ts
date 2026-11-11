@@ -504,6 +504,7 @@ describe('AdminService', () => {
           firstName: 'Mai',
           lastName: 'Tran',
         },
+        page: { archivedAt: null, workspace: { archivedAt: null } },
       });
 
       const result = await service.listReports({});
@@ -547,11 +548,13 @@ describe('AdminService', () => {
         email: 'target@example.com',
         firstName: 'Target',
         lastName: 'User',
+        status: AccountStatus.ACTIVE,
       });
 
       mockPrisma.course.findUnique.mockResolvedValue({
         id: 'course-1',
         title: 'Introduction to NestJS',
+        isSuspended: false,
       });
 
       const result = await service.listReports({});
@@ -612,6 +615,7 @@ describe('AdminService', () => {
             firstName: 'Mai',
             lastName: 'Tran',
           },
+          page: { archivedAt: null, workspace: { archivedAt: null } },
         })
         .mockResolvedValueOnce({
           id: 'message-1',
@@ -756,11 +760,13 @@ describe('AdminService', () => {
           email: 'target@example.com',
           firstName: 'Target',
           lastName: 'User',
+          status: AccountStatus.ACTIVE,
         });
       } else {
         mockPrisma.course.findUnique.mockResolvedValue({
           id: targetId,
           title: 'Course title',
+          isSuspended: false,
         });
       }
 
@@ -844,6 +850,7 @@ describe('AdminService', () => {
         email: 'target@example.com',
         firstName: 'Target',
         lastName: 'User',
+        status: AccountStatus.ACTIVE,
       });
 
       mockAuditService.record.mockResolvedValue({ id: 'audit-1' });
