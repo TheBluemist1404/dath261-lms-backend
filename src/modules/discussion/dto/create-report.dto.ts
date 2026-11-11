@@ -4,7 +4,7 @@ import { IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validat
 import { trim } from '../../workspaces/dto/trim.js';
 
 /** Only discussion messages can be reported from the workspace so far. */
-export const REPORTABLE_TARGETS = ['MESSAGE'] as const;
+export const REPORTABLE_TARGETS = ['MESSAGE', 'USER', 'COURSE'] as const;
 
 export class CreateReportDto {
   @ApiProperty({ enum: REPORTABLE_TARGETS })
