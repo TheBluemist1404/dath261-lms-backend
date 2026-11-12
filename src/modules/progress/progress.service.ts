@@ -1,6 +1,6 @@
+// progress.service.ts
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -9,7 +9,6 @@ import {
 import {
   AssignmentSubmissionStatus,
   BlockType,
-  CourseStatus,
   EnrollmentStatus,
   Prisma,
   QuizAttemptStatus,
@@ -19,19 +18,17 @@ import { PrismaService } from '../../infrastructure/database/prisma/prisma.servi
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
 import type { UpdateBlockCompletionDto } from './dto/update-block-completion.dto.js';
 import type { UpdateLearningPositionDto } from './dto/update-learning-position.dto.js';
+import {
+  MANUALLY_COMPLETABLE_TYPES,
+  RESUMABLE_BLOCK_TYPES,
+  TRACKED_BLOCK_TYPES,
+} from './progress.constants.js';
+import {
+  computeProgressMetrics,
+  loadProgressForEnrollments,
+  type RosterProgressSummary,
+} from './progress.util.js';
 import type { ResumeData } from './types/resume-data.type.js';
-
-const TRACKED_BLOCK_TYPES: BlockType[] = [
-  BlockType.TEXT,
-  BlockType.FILE,
-  BlockType.VIDEO,
-  BlockType.QUIZ,
-  BlockType.ASSIGNMENT,
-];
-
-const MANUALLY_COMPLETABLE_TYPES: BlockType[] = [BlockType.TEXT, BlockType.FILE, BlockType.VIDEO];
-
-const RESUMABLE_BLOCK_TYPES = TRACKED_BLOCK_TYPES;
 
 @Injectable()
 export class ProgressService {
@@ -189,6 +186,22 @@ export class ProgressService {
         items: snapshot.items,
       };
     });
+  }
+
+  // -----------------------------------------------
+  // Lecturer: Batch progress for a roster page
+  // -----------------------------------------------
+
+  /**
+   * Batch-load progress summaries for several enrollments at once.
+   * Reuses the same formula as `getProgressSnapshot` via `computeProgressMetrics`,
+   * so a roster row always matches what the student sees in the reader.
+   */
+  async getProgressForEnrollments(
+    courseId: string,
+    enrollmentIds: string[],
+  ): Promise<Map<string, RosterProgressSummary>> {
+    return loadProgressForEnrollments(this.prisma, courseId, enrollmentIds);
   }
 
   // -----------------------------------------------
@@ -478,33 +491,12 @@ export class ProgressService {
       };
     });
 
-    const totalItems = items.length;
-
-    const completedItems = items.filter((item) => item.completed).length;
-
-    const quizzes = items.filter((item) => item.type === BlockType.QUIZ);
-
-    const completedQuizzes = quizzes.filter((item) => item.completed).length;
+    const metrics = computeProgressMetrics(items);
 
     return {
-      progress: {
-        totalItems,
-        completedItems,
-        learningProgressPercentage: this.percentage(completedItems, totalItems),
-        totalQuizzes: quizzes.length,
-        completedQuizzes,
-        quizCompletionPercentage: this.percentage(completedQuizzes, quizzes.length),
-      },
+      progress: metrics,
       items,
     };
-  }
-
-  private percentage(completed: number, total: number): number {
-    if (total === 0) {
-      return 0;
-    }
-
-    return Math.round((completed / total) * 10_000) / 100;
   }
 
   private validateResumeData(blockType: BlockType, value: ResumeData): void {
