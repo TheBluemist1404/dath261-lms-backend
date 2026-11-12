@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { validateEnvironment } from './config/env.validation.js';
 import { HealthModule } from './health/health.module.js';
 import { DatabaseModule } from './infrastructure/database/database.module.js';
+import { AdminModule } from './modules/admin/admin.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { AccessTokenGuard } from './modules/auth/guards/access-token.guard.js';
@@ -41,6 +42,7 @@ import { WorkspacesModule } from './modules/workspaces/workspaces.module.js';
     ProgressModule,
     QuizModule,
     AuditModule,
+    AdminModule,
   ],
   providers: [
     {

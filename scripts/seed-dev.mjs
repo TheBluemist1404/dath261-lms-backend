@@ -18,6 +18,8 @@ const users = [
   ['seed-user-student', 'student@dath261.dev', 'An', 'Nguyen', 'STUDENT'],
   ['seed-user-classmate', 'classmate@dath261.dev', 'Binh', 'Tran', 'STUDENT'],
   ['seed-user-lecturer', 'lecturer@dath261.dev', 'Chi', 'Le', 'LECTURER'],
+  // Admins have no workspace, so this account only opens the admin screens.
+  ['seed-user-admin', 'admin@dath261.dev', 'Dung', 'Pham', 'ADMIN'],
 ];
 
 const courses = [

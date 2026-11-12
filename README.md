@@ -147,7 +147,12 @@ Useful commands:
 | `pnpm prisma:format` | Format the Prisma schema |
 | `pnpm db:migrate` | Create/apply development migrations |
 | `pnpm db:deploy` | Apply committed migrations in deployment |
+| `pnpm db:check-migrations` | Fail if `prisma/` has changes with no migration (needs `SHADOW_DATABASE_URL`) |
+| `pnpm db:seed:dev` | Add the demo accounts and sample data (safe to run again) |
+| `pnpm db:reset:dev` | Wipe a local database, reapply migrations and reseed |
 | `pnpm db:studio` | Open Prisma Studio |
+
+Every schema change needs a migration (`pnpm db:migrate --name <change>`); CI checks this. Demo accounts, deployment and reset steps are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 Do not create database entities speculatively. The reviewed Notion domain/data model drives Prisma models and migrations.
 
@@ -156,7 +161,8 @@ Do not create database entities speculatively. The reviewed Notion domain/data m
 | Command | Purpose |
 | --- | --- |
 | `pnpm start:dev` | Run NestJS in watch mode |
-| `pnpm build` | Compile the backend |
+| `pnpm build` | Compile the backend into `dist/` (entry `dist/src/main.js`) |
+| `pnpm start:prod` | Run the compiled backend |
 | `pnpm typecheck` | Run TypeScript without emitting |
 | `pnpm test` | Run unit tests |
 | `pnpm test:e2e` | Run E2E tests |
