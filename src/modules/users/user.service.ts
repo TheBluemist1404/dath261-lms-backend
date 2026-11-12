@@ -1,3 +1,4 @@
+//user.service.ts
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { AccountStatus, Prisma } from '../../generated/prisma/client.js';
 import { AuditAction, AuditEntityType } from '../../generated/prisma/enums.js';
