@@ -1,9 +1,5 @@
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+//progress.service.spec.ts
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -57,6 +53,10 @@ const tx = {
 
 const prismaMock = {
   $transaction: vi.fn(),
+  // Needed by loadProgressForEnrollments (batch progress, called outside a tx).
+  courseBlock: {
+    findMany: vi.fn(),
+  },
 };
 
 const enrollmentServiceMock = {
@@ -157,6 +157,9 @@ describe('ProgressService', () => {
 
     tx.quizAttempt.findMany.mockResolvedValue([]);
     tx.assignmentSubmission.findMany.mockResolvedValue([]);
+
+    // Default for the batch loader — overridden per test.
+    prismaMock.courseBlock.findMany.mockResolvedValue([]);
 
     service = new ProgressService(
       prismaMock as unknown as PrismaService,
@@ -555,6 +558,92 @@ describe('ProgressService', () => {
         totalQuizzes: 0,
         completedQuizzes: 0,
         quizCompletionPercentage: 0,
+      });
+    });
+  });
+
+  // ==================================================
+  // LECTURER: BATCH PROGRESS (roster support)
+  // ==================================================
+
+  describe('getProgressForEnrollments', () => {
+    it('returns an empty Map when no enrollment IDs are provided', async () => {
+      const result = await service.getProgressForEnrollments(COURSE_ID, []);
+
+      expect(result.size).toBe(0);
+      expect(prismaMock.courseBlock.findMany).not.toHaveBeenCalled();
+    });
+
+    it('computes the same progress as getStudentProgress for the same enrollment', async () => {
+      // Enrollment A completes 2 of 4 blocks.
+      // Enrollment B completes 0 of 4 blocks.
+      const blocks = [
+        {
+          id: 'text-1',
+          type: BlockType.TEXT,
+          progressEntries: [
+            { enrollmentId: 'enrollment-a', completed: true },
+            { enrollmentId: 'enrollment-b', completed: false },
+          ],
+        },
+        {
+          id: 'file-1',
+          type: BlockType.FILE,
+          progressEntries: [{ enrollmentId: 'enrollment-a', completed: true }],
+        },
+        {
+          id: 'video-1',
+          type: BlockType.VIDEO,
+          progressEntries: [],
+        },
+        {
+          id: 'quiz-1',
+          type: BlockType.QUIZ,
+          progressEntries: [],
+        },
+      ];
+
+      prismaMock.courseBlock.findMany.mockResolvedValue(blocks);
+
+      const result = await service.getProgressForEnrollments(COURSE_ID, [
+        'enrollment-a',
+        'enrollment-b',
+      ]);
+
+      expect(result.get('enrollment-a')).toEqual({
+        completedBlocks: 2,
+        totalBlocks: 4,
+        percent: 50,
+      });
+      expect(result.get('enrollment-b')).toEqual({
+        completedBlocks: 0,
+        totalBlocks: 4,
+        percent: 0,
+      });
+
+      // Ensure exactly one query for the entire batch (no N+1).
+      expect(prismaMock.courseBlock.findMany).toHaveBeenCalledTimes(1);
+      const args = prismaMock.courseBlock.findMany.mock.calls[0][0];
+      expect(args.where).toEqual(
+        expect.objectContaining({
+          courseId: COURSE_ID,
+        }),
+      );
+      expect(args.select.progressEntries.where.enrollmentId.in).toEqual([
+        'enrollment-a',
+        'enrollment-b',
+      ]);
+    });
+
+    it('reports zero total/percent when the course has no tracked blocks', async () => {
+      prismaMock.courseBlock.findMany.mockResolvedValue([]);
+
+      const result = await service.getProgressForEnrollments(COURSE_ID, ['enrollment-a']);
+
+      expect(result.get('enrollment-a')).toEqual({
+        completedBlocks: 0,
+        totalBlocks: 0,
+        percent: 0,
       });
     });
   });
