@@ -1,7 +1,6 @@
+//progress-response.dto.ts
 import { ApiProperty } from '@nestjs/swagger';
 import { BlockType, EnrollmentStatus } from '../../../generated/prisma/client.js';
-
-import { MyEnrollmentState } from '../../enrollments/enums/my-enrollment-state.enum.js';
 import type { ResumeData } from '../types/resume-data.type.js';
 
 export class ProgressMetricsDto {

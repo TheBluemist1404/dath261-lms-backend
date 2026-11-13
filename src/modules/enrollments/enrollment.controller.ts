@@ -1,3 +1,4 @@
+//enrollment.controller.ts
 import {
   Controller,
   Delete,
@@ -13,6 +14,7 @@ import {
 } from '@nestjs/common';
 
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
@@ -22,6 +24,7 @@ import {
   ApiOperation,
   ApiParam,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 
 import type { Request } from 'express';
@@ -33,8 +36,10 @@ import { RolesGuard } from '../authorization/roles.guard.js';
 import { CourseEnrollmentParamsDto, CourseIdParamDto } from './dto/course-id-param.dto.js';
 import { EnrollmentActionResponseDto } from './dto/enrollment-action-response.dto.js';
 import { EnrollmentCompletionResponseDto } from './dto/enrollment-completion-response.dto.js';
+import { EnrollmentRosterQueryDto } from './dto/enrollment-roster-query.dto.js';
 import { EnrollmentStateResponseDto } from './dto/enrollment-state-response.dto.js';
 import { MyEnrollmentsQueryDto } from './dto/my-enrollments-query.dto.js';
+import { PaginatedEnrollmentRosterResponseDto } from './dto/paginated-enrollment-roster-response.dto.js';
 import { PaginatedMyCoursesResponseDto } from './dto/paginated-my-courses-response.dto.js';
 import { EnrollmentService } from './enrollment.service.js';
 
@@ -124,6 +129,7 @@ export class EnrollmentController {
   ): Promise<PaginatedMyCoursesResponseDto> {
     return this.enrollmentService.getMyEnrollments(req.user.userId, query);
   }
+
   @Get('courses/:courseId/enrollments/me')
   @Roles(UserRole.STUDENT)
   @ApiOperation({
@@ -137,6 +143,33 @@ export class EnrollmentController {
     @Req() req: AuthenticatedRequest,
   ): Promise<EnrollmentStateResponseDto> {
     return this.enrollmentService.getCourseEnrollmentState(req.user.userId, params.courseId);
+  }
+
+  @Get('courses/:courseId/enrollments')
+  @Roles(UserRole.LECTURER)
+  @ApiOperation({
+    summary: 'Get the enrolled-student roster for a course',
+    description:
+      'Owning Lecturer only. Returns each enrollment with the student, progress (same counting as the student progress endpoint), and the mean quiz final score. ' +
+      'LEFT enrollments are excluded by default. Works for DRAFT/suspended courses (FR-EN-07).',
+  })
+  @ApiParam({ name: 'courseId', description: 'The ID of the course', example: 'clx123abc' })
+  @ApiOkResponse({
+    description: 'Paginated roster of enrollments for the owning Lecturer.',
+    type: PaginatedEnrollmentRosterResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid query parameters (e.g. unknown status, limit > 100, page < 1).',
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token.' })
+  @ApiForbiddenResponse({ description: 'You do not own this course.' })
+  @ApiNotFoundResponse({ description: 'Course not found.' })
+  async getCourseRoster(
+    @Param() params: CourseIdParamDto,
+    @Query() query: EnrollmentRosterQueryDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PaginatedEnrollmentRosterResponseDto> {
+    return this.enrollmentService.listCourseRoster(req.user.userId, params.courseId, query);
   }
 
   @Patch('courses/:courseId/enrollments/:enrollmentId/complete')

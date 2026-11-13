@@ -1,3 +1,4 @@
+//progress.controller.spec.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BlockType, EnrollmentStatus, UserRole } from '../../../generated/prisma/client.js';
@@ -20,6 +21,8 @@ describe('ProgressController', () => {
     getStudentProgress: vi.fn(),
     getResumePosition: vi.fn(),
     getLecturerStudentProgress: vi.fn(),
+    // Added in the roster task — kept in the mock so the mock mirrors the service.
+    getProgressForEnrollments: vi.fn(),
   };
 
   const studentRequest = {

@@ -1,15 +1,32 @@
+// enrollment.service.ts
 import {
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CourseStatus, EnrollmentStatus, Prisma } from '../../generated/prisma/client.js';
+import {
+  BlockType,
+  CourseStatus,
+  EnrollmentStatus,
+  Prisma,
+  QuizAttemptStatus,
+  QuizScoringMode,
+} from '../../generated/prisma/client.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
+import { loadProgressForEnrollments, roundHalfUp } from '../progress/progress.util.js';
+import { EnrollmentRosterQueryDto } from './dto/enrollment-roster-query.dto.js';
+import type { EnrollmentRosterItemDto } from './dto/enrollment-roster-response.dto.js';
 import { MyEnrollmentsQueryDto } from './dto/my-enrollments-query.dto.js';
+import type { PaginatedEnrollmentRosterResponseDto } from './dto/paginated-enrollment-roster-response.dto.js';
 import { MyEnrollmentState } from './enums/my-enrollment-state.enum.js';
 
 type EnrollmentAccessClient = Pick<Prisma.TransactionClient, 'course' | 'enrollment'>;
+
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const QUIZ_SCORE_DECIMALS = 2;
+
 @Injectable()
 export class EnrollmentService {
   constructor(private readonly prisma: PrismaService) {}
@@ -486,6 +503,326 @@ export class EnrollmentService {
         completedAt: now,
       };
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lecturer: course roster
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Return the roster of a course for its owning Lecturer:
+   * every enrollment with the student, progress (same counting as the student
+   * endpoint) and the mean quiz final score.
+   *
+   * FR-EN-07: this deliberately does NOT check the course status. A course moved
+   * back to DRAFT (or suspended) keeps its enrollments and learning data, and the
+   * owning Lecturer must still be able to review them to grade completion.
+   */
+  async listCourseRoster(
+    lecturerId: string,
+    courseId: string,
+    query: EnrollmentRosterQueryDto,
+  ): Promise<PaginatedEnrollmentRosterResponseDto> {
+    await this.assertLecturerOwnsCourse(courseId, lecturerId);
+
+    const page = query.page ?? DEFAULT_PAGE;
+    const limit = query.limit ?? DEFAULT_LIMIT;
+    const skip = (page - 1) * limit;
+
+    const where = this.buildRosterWhere(courseId, query);
+
+    const [total, enrollments] = await Promise.all([
+      this.prisma.enrollment.count({ where }),
+      this.prisma.enrollment.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [{ enrolledAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+          status: true,
+          enrolledAt: true,
+          completedAt: true,
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const enrollmentIds = enrollments.map((enrollment) => enrollment.id);
+
+    const [progressByEnrollment, quizScoreByEnrollment] = await Promise.all([
+      loadProgressForEnrollments(this.prisma, courseId, enrollmentIds),
+      this.aggregateQuizScores(courseId, enrollmentIds),
+    ]);
+
+    const data: EnrollmentRosterItemDto[] = enrollments.map((enrollment) => {
+      const progress = progressByEnrollment.get(enrollment.id) ?? {
+        completedBlocks: 0,
+        totalBlocks: 0,
+        percent: 0,
+      };
+
+      return {
+        enrollmentId: enrollment.id,
+        status: enrollment.status,
+        enrolledAt: enrollment.enrolledAt,
+        completedAt: enrollment.completedAt,
+        student: {
+          id: enrollment.user.id,
+          firstName: enrollment.user.firstName,
+          lastName: enrollment.user.lastName,
+          email: enrollment.user.email,
+        },
+        progress,
+        quizScore: quizScoreByEnrollment.get(enrollment.id) ?? null,
+      };
+    });
+
+    return {
+      data,
+      meta: this.buildRosterMeta(total, page, limit),
+    };
+  }
+
+  private async assertLecturerOwnsCourse(courseId: string, lecturerId: string) {
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+      select: { id: true, lecturerId: true },
+    });
+
+    if (!course) {
+      throw new NotFoundException('Course not found.');
+    }
+
+    if (course.lecturerId !== lecturerId) {
+      throw new ForbiddenException('You do not own this course.');
+    }
+
+    return course;
+  }
+
+  private buildRosterWhere(
+    courseId: string,
+    query: EnrollmentRosterQueryDto,
+  ): Prisma.EnrollmentWhereInput {
+    const where: Prisma.EnrollmentWhereInput = { courseId };
+
+    if (query.status) {
+      where.status = query.status;
+    } else {
+      // Default: ACTIVE + COMPLETED. LEFT students are excluded unless requested.
+      where.status = {
+        in: [EnrollmentStatus.ACTIVE, EnrollmentStatus.COMPLETED],
+      };
+    }
+
+    const search = query.search?.trim();
+    if (search) {
+      where.user = {
+        is: {
+          OR: [
+            { firstName: { contains: search, mode: 'insensitive' } },
+            { lastName: { contains: search, mode: 'insensitive' } },
+            { email: { contains: search, mode: 'insensitive' } },
+          ],
+        },
+      };
+    }
+
+    return where;
+  }
+
+  private buildRosterMeta(total: number, page: number, limit: number) {
+    const totalPages = Math.ceil(total / limit) || 0;
+
+    return {
+      total,
+      page,
+      limit,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    };
+  }
+
+  /**
+   * For each enrollment, compute the mean of each quiz's final score (per its
+   * scoringMode) over quizzes with at least one graded attempt. Null when the
+   * student has no graded attempt in the course.
+   *
+   * Two fixed queries (quiz blocks + attempts), no N+1.
+   */
+  private async aggregateQuizScores(
+    courseId: string,
+    enrollmentIds: string[],
+  ): Promise<Map<string, number | null>> {
+    const result = new Map<string, number | null>();
+    for (const enrollmentId of enrollmentIds) {
+      result.set(enrollmentId, null);
+    }
+
+    if (enrollmentIds.length === 0) {
+      return result;
+    }
+
+    const quizBlocks = await this.prisma.courseBlock.findMany({
+      where: {
+        courseId,
+        type: BlockType.QUIZ,
+      },
+      select: {
+        id: true,
+        quizConfig: {
+          select: { scoringMode: true },
+        },
+      },
+    });
+
+    if (quizBlocks.length === 0) {
+      return result;
+    }
+
+    const scoringModeByBlock = new Map<string, QuizScoringMode>();
+    for (const block of quizBlocks) {
+      if (block.quizConfig) {
+        scoringModeByBlock.set(block.id, block.quizConfig.scoringMode);
+      }
+    }
+
+    const attempts = await this.prisma.quizAttempt.findMany({
+      where: {
+        enrollmentId: { in: enrollmentIds },
+        courseBlockId: { in: quizBlocks.map((block) => block.id) },
+        status: { in: [QuizAttemptStatus.SUBMITTED, QuizAttemptStatus.GRADED] },
+        score: { not: null },
+      },
+      select: {
+        enrollmentId: true,
+        courseBlockId: true,
+        attemptNumber: true,
+        score: true,
+        submittedAt: true,
+      },
+    });
+
+    // Group attempts per (enrollmentId, blockId).
+    const attemptsByEnrollmentAndBlock = new Map<string, Map<string, typeof attempts>>();
+
+    for (const attempt of attempts) {
+      let byBlock = attemptsByEnrollmentAndBlock.get(attempt.enrollmentId);
+      if (!byBlock) {
+        byBlock = new Map();
+        attemptsByEnrollmentAndBlock.set(attempt.enrollmentId, byBlock);
+      }
+
+      const list = byBlock.get(attempt.courseBlockId) ?? [];
+      list.push(attempt);
+      byBlock.set(attempt.courseBlockId, list);
+    }
+
+    for (const enrollmentId of enrollmentIds) {
+      const byBlock = attemptsByEnrollmentAndBlock.get(enrollmentId);
+      if (!byBlock || byBlock.size === 0) {
+        continue;
+      }
+
+      const finalScores: number[] = [];
+
+      for (const [blockId, blockAttempts] of byBlock.entries()) {
+        const scoringMode = scoringModeByBlock.get(blockId);
+        if (!scoringMode) {
+          continue;
+        }
+
+        const finalScore = this.pickFinalQuizScore(blockAttempts, scoringMode);
+        if (finalScore !== null) {
+          finalScores.push(finalScore);
+        }
+      }
+
+      if (finalScores.length === 0) {
+        continue;
+      }
+
+      const mean = finalScores.reduce((sum, value) => sum + value, 0) / finalScores.length;
+      result.set(enrollmentId, roundHalfUp(mean, QUIZ_SCORE_DECIMALS));
+    }
+
+    return result;
+  }
+
+  /**
+   * Pick the final score of one quiz given its scoring mode.
+   * Only graded attempts with a non-null score are passed in.
+   */
+  private pickFinalQuizScore(
+    attempts: Array<{
+      attemptNumber: number;
+      score: Prisma.Decimal | null;
+      submittedAt: Date | null;
+    }>,
+    scoringMode: QuizScoringMode,
+  ): number | null {
+    if (attempts.length === 0) {
+      return null;
+    }
+
+    if (scoringMode === QuizScoringMode.HIGHEST) {
+      const scores = attempts
+        .map((attempt) => this.toScoreNumber(attempt.score))
+        .filter((score): score is number => score !== null);
+
+      if (scores.length === 0) {
+        return null;
+      }
+
+      return Math.max(...scores);
+    }
+
+    if (scoringMode === QuizScoringMode.LATEST) {
+      const latest = [...attempts].sort((a, b) => {
+        if (b.attemptNumber !== a.attemptNumber) {
+          return b.attemptNumber - a.attemptNumber;
+        }
+        const aTime = a.submittedAt?.getTime() ?? 0;
+        const bTime = b.submittedAt?.getTime() ?? 0;
+        return bTime - aTime;
+      })[0];
+
+      return this.toScoreNumber(latest.score);
+    }
+
+    if (scoringMode === QuizScoringMode.AVERAGE) {
+      const scores = attempts
+        .map((attempt) => this.toScoreNumber(attempt.score))
+        .filter((score): score is number => score !== null);
+
+      if (scores.length === 0) {
+        return null;
+      }
+
+      const mean = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+      return roundHalfUp(mean, QUIZ_SCORE_DECIMALS);
+    }
+
+    // Defensive: unknown scoring mode → no score.
+    return null;
+  }
+
+  private toScoreNumber(score: Prisma.Decimal | null): number | null {
+    if (score === null) {
+      return null;
+    }
+
+    const parsed = Number(score.toString());
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   /**
