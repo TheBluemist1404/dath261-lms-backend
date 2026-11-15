@@ -80,13 +80,49 @@ describe('Course (e2e)', () => {
       await testApp.http().post('/api/courses').send({ title: 'No auth' }).expect(401);
     });
 
-    it('should return 401 on GET /courses/:courseId without token', async () => {
+    // GET /courses/:courseId is now @OptionalAuth: guests can read PUBLISHED
+    // non-suspended courses, but drafts/suspended return 404, and an invalid
+    // token still returns 401.
+    it('should let a guest read a PUBLISHED non-suspended course', async () => {
       const course = await createCourse({
         lecturerId: lecturerA.id,
         status: CourseStatus.PUBLISHED,
       });
 
-      await testApp.http().get(`/api/courses/${course.id}`).expect(401);
+      const res = await testApp.http().get(`/api/courses/${course.id}`).expect(200);
+      expect(res.body.id).toBe(course.id);
+    });
+
+    it('should return 404 for a guest on a DRAFT course', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.DRAFT,
+      });
+
+      await testApp.http().get(`/api/courses/${course.id}`).expect(404);
+    });
+
+    it('should return 404 for a guest on a suspended course', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+        isSuspended: true,
+      });
+
+      await testApp.http().get(`/api/courses/${course.id}`).expect(404);
+    });
+
+    it('should return 401 for an invalid token on GET /courses/:courseId', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+      });
+
+      await testApp
+        .http()
+        .get(`/api/courses/${course.id}`)
+        .set('Authorization', 'Bearer not-a-real-token')
+        .expect(401);
     });
 
     it('should let a guest read the catalog without a token', async () => {
@@ -546,6 +582,116 @@ describe('Course (e2e)', () => {
 
     it('should return 404 when course does not exist', async () => {
       await testApp.http().get('/api/courses/non-existent').set(lecturerA.auth).expect(404);
+    });
+
+    // -------------------------------------------------------------------------
+    // Guest (no token) — added with the optional-auth change
+    // -------------------------------------------------------------------------
+    it('should let a guest read a PUBLISHED non-suspended course', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+      });
+
+      const res = await testApp.http().get(`/api/courses/${course.id}`).expect(200);
+      expect(res.body.id).toBe(course.id);
+      expect(res.body.lecturer).toEqual({ id: lecturerA.id, name: 'Nguyen An' });
+    });
+
+    it('should return 404 for a guest on a DRAFT course', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.DRAFT,
+      });
+
+      await testApp.http().get(`/api/courses/${course.id}`).expect(404);
+    });
+
+    it('should return 404 for a guest on a suspended course', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+        isSuspended: true,
+      });
+
+      await testApp.http().get(`/api/courses/${course.id}`).expect(404);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Read — outline (public syllabus, metadata only)
+  // ---------------------------------------------------------------------------
+  describe('GET /api/courses/:courseId/outline', () => {
+    it('should let a guest read the ordered outline of a PUBLISHED non-suspended course', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+      });
+
+      const week1 = await testApp.prisma.courseBlock.create({
+        data: { courseId: course.id, type: 'MODULE', title: 'Week 1', position: 0 },
+      });
+      const intro = await testApp.prisma.courseBlock.create({
+        data: {
+          courseId: course.id,
+          type: 'VIDEO',
+          title: 'Intro',
+          position: 0,
+          parentModuleId: week1.id,
+          content: { url: 'https://example.com/secret.mp4' },
+        },
+      });
+
+      const res = await testApp.http().get(`/api/courses/${course.id}/outline`).expect(200);
+
+      expect(res.body).toEqual([
+        {
+          id: week1.id,
+          type: 'MODULE',
+          title: 'Week 1',
+          position: 0,
+          children: [{ id: intro.id, type: 'VIDEO', title: 'Intro', position: 0 }],
+        },
+      ]);
+
+      // No content leak anywhere in the payload.
+      expect(res.body[0]).not.toHaveProperty('content');
+      expect(res.body[0].children[0]).not.toHaveProperty('content');
+    });
+
+    it('should return 404 for a DRAFT course, even to its owner', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.DRAFT,
+      });
+
+      await testApp.http().get(`/api/courses/${course.id}/outline`).expect(404);
+      await testApp.http().get(`/api/courses/${course.id}/outline`).set(lecturerA.auth).expect(404);
+    });
+
+    it('should return 404 for a suspended course', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+        isSuspended: true,
+      });
+
+      await testApp.http().get(`/api/courses/${course.id}/outline`).expect(404);
+    });
+
+    it('should return 404 when the course does not exist', async () => {
+      await testApp.http().get('/api/courses/non-existent/outline').expect(404);
+    });
+
+    it('should return an empty array when the published course has no blocks', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+      });
+
+      const res = await testApp.http().get(`/api/courses/${course.id}/outline`).expect(200);
+
+      expect(res.body).toEqual([]);
     });
   });
 

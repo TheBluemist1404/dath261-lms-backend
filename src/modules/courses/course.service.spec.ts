@@ -3,7 +3,12 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { vi } from 'vitest';
-import { AuditAction, AuditEntityType, CourseStatus } from '../../generated/prisma/enums.js';
+import {
+  AuditAction,
+  AuditEntityType,
+  BlockType,
+  CourseStatus,
+} from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
 import { CourseService } from './course.service.js';
@@ -381,6 +386,198 @@ describe('CourseService - findOne', () => {
     );
 
     await expect(service.findOne(courseId, otherId)).rejects.toThrow(NotFoundException);
+  });
+
+  // -------------------------------------------------------------------------
+  // Guest (no requesterId) — added with the optional-auth change
+  // -------------------------------------------------------------------------
+  it('should let a guest read a PUBLISHED non-suspended course (no requester)', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue(
+      buildCourse({ status: CourseStatus.PUBLISHED, isSuspended: false }),
+    );
+
+    const result = await service.findOne(courseId);
+
+    expect(result.id).toBe(courseId);
+    expect(result.lecturer).toEqual({ id: 'lecturer-1', name: 'Nguyen An' });
+  });
+
+  it('should throw NotFoundException when a guest reads a DRAFT course', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue(buildCourse({ status: CourseStatus.DRAFT }));
+
+    await expect(service.findOne(courseId)).rejects.toThrow(NotFoundException);
+  });
+
+  it('should throw NotFoundException when a guest reads a suspended course', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue(
+      buildCourse({ status: CourseStatus.PUBLISHED, isSuspended: true }),
+    );
+
+    await expect(service.findOne(courseId)).rejects.toThrow(NotFoundException);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findOutline
+// ---------------------------------------------------------------------------
+describe('CourseService - findOutline', () => {
+  let service: CourseService;
+
+  const mockPrisma = {
+    course: {
+      findUnique: vi.fn(),
+    },
+    courseBlock: {
+      findMany: vi.fn(),
+    },
+  };
+
+  const courseId = 'course-1';
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CourseService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: AuditService, useValue: mockAuditService },
+      ],
+    }).compile();
+
+    service = module.get<CourseService>(CourseService);
+    vi.clearAllMocks();
+  });
+
+  it('should throw NotFoundException when course does not exist', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue(null);
+
+    await expect(service.findOutline(courseId)).rejects.toThrow(
+      new NotFoundException('Course not found.'),
+    );
+    expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
+  });
+
+  it('should throw NotFoundException for a DRAFT course (no exception for owner)', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({
+      id: courseId,
+      status: CourseStatus.DRAFT,
+      isSuspended: false,
+    });
+
+    await expect(service.findOutline(courseId)).rejects.toThrow(NotFoundException);
+    expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
+  });
+
+  it('should throw NotFoundException for a suspended course', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({
+      id: courseId,
+      status: CourseStatus.PUBLISHED,
+      isSuspended: true,
+    });
+
+    await expect(service.findOutline(courseId)).rejects.toThrow(NotFoundException);
+    expect(mockPrisma.courseBlock.findMany).not.toHaveBeenCalled();
+  });
+
+  it('should return an empty array when a published course has no blocks', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({
+      id: courseId,
+      status: CourseStatus.PUBLISHED,
+      isSuspended: false,
+    });
+    mockPrisma.courseBlock.findMany.mockResolvedValue([]);
+
+    const result = await service.findOutline(courseId);
+
+    expect(result).toEqual([]);
+    expect(mockPrisma.courseBlock.findMany).toHaveBeenCalledWith({
+      where: { courseId },
+      select: {
+        id: true,
+        type: true,
+        title: true,
+        position: true,
+        parentModuleId: true,
+      },
+      orderBy: [{ parentModuleId: 'asc' }, { position: 'asc' }],
+    });
+  });
+
+  it('should build a 2-level tree ordered by position and never include content', async () => {
+    mockPrisma.course.findUnique.mockResolvedValue({
+      id: courseId,
+      status: CourseStatus.PUBLISHED,
+      isSuspended: false,
+    });
+
+    mockPrisma.courseBlock.findMany.mockResolvedValue([
+      // Roots out of order to prove sorting
+      {
+        id: 'mod-2',
+        type: BlockType.MODULE,
+        title: 'Week 2',
+        position: 1,
+        parentModuleId: null,
+      },
+      {
+        id: 'mod-1',
+        type: BlockType.MODULE,
+        title: 'Week 1',
+        position: 0,
+        parentModuleId: null,
+      },
+      // Children out of order
+      {
+        id: 'c-2',
+        type: BlockType.TEXT,
+        title: 'Setup',
+        position: 1,
+        parentModuleId: 'mod-1',
+      },
+      {
+        id: 'c-1',
+        type: BlockType.VIDEO,
+        title: 'Intro',
+        position: 0,
+        parentModuleId: 'mod-1',
+      },
+      {
+        id: 'c-3',
+        type: BlockType.QUIZ,
+        title: 'Quiz 1',
+        position: 0,
+        parentModuleId: 'mod-2',
+      },
+    ]);
+
+    const result = await service.findOutline(courseId);
+
+    expect(result).toEqual([
+      {
+        id: 'mod-1',
+        type: BlockType.MODULE,
+        title: 'Week 1',
+        position: 0,
+        children: [
+          { id: 'c-1', type: BlockType.VIDEO, title: 'Intro', position: 0 },
+          { id: 'c-2', type: BlockType.TEXT, title: 'Setup', position: 1 },
+        ],
+      },
+      {
+        id: 'mod-2',
+        type: BlockType.MODULE,
+        title: 'Week 2',
+        position: 1,
+        children: [{ id: 'c-3', type: BlockType.QUIZ, title: 'Quiz 1', position: 0 }],
+      },
+    ]);
+
+    // Explicit guard: no content leak on any node.
+    for (const root of result) {
+      expect(root).not.toHaveProperty('content');
+      for (const child of root.children) {
+        expect(child).not.toHaveProperty('content');
+      }
+    }
   });
 });
 
