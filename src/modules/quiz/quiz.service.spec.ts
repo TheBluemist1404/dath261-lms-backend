@@ -15,6 +15,7 @@ import {
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
+import { NotificationService } from '../notification/notification.service.js';
 import { CreateQuizDto } from './dto/create-quiz.dto.js';
 import { QuizService } from './quiz.service.js';
 import { QuizGradingService } from './quiz-grading.service.js';
@@ -124,18 +125,26 @@ const createMocks = () => {
     assertCanAccessCourse: vi.fn(),
   };
 
-  return { mockPrisma, mockEnrollment };
+  const mockNotification = {
+    notifyNewContentOnPublish: vi.fn().mockResolvedValue({ created: 0 }),
+    notifyNewContentOnBlockAdded: vi.fn().mockResolvedValue({ created: 0 }),
+    notifyResultReleased: vi.fn().mockResolvedValue({ created: 0 }),
+  };
+
+  return { mockPrisma, mockEnrollment, mockNotification };
 };
 
 describe('QuizService', () => {
   let service: QuizService;
   let mockPrisma: ReturnType<typeof createMocks>['mockPrisma'];
   let mockEnrollment: ReturnType<typeof createMocks>['mockEnrollment'];
+  let mockNotification: ReturnType<typeof createMocks>['mockNotification'];
 
   beforeEach(async () => {
     const mocks = createMocks();
     mockPrisma = mocks.mockPrisma;
     mockEnrollment = mocks.mockEnrollment;
+    mockNotification = mocks.mockNotification;
 
     // Default $transaction:
     // - array form: resolve all
@@ -153,6 +162,7 @@ describe('QuizService', () => {
         QuizGradingService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrollmentService, useValue: mockEnrollment },
+        { provide: NotificationService, useValue: mockNotification },
       ],
     }).compile();
 

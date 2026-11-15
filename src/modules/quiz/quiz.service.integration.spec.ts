@@ -15,6 +15,7 @@ import {
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
+import { NotificationService } from '../notification/notification.service.js';
 import { QuizService } from './quiz.service.js';
 import { QuizGradingService } from './quiz-grading.service.js';
 
@@ -30,8 +31,8 @@ describe('QuizService - integration', () => {
   let student: { id: string };
   let otherStudent: { id: string };
   let courseId: string;
-  let enrollmentStudent: { id: string };
-  let enrollmentOther: { id: string };
+  //let enrollmentStudent: { id: string };
+  //let enrollmentOther: { id: string };
 
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({
@@ -41,7 +42,13 @@ describe('QuizService - integration', () => {
           envFilePath: '.env',
         }),
       ],
-      providers: [PrismaService, EnrollmentService, QuizService, QuizGradingService],
+      providers: [
+        PrismaService,
+        EnrollmentService,
+        QuizService,
+        QuizGradingService,
+        NotificationService,
+      ],
     }).compile();
 
     prisma = moduleRef.get(PrismaService);
@@ -150,15 +157,15 @@ describe('QuizService - integration', () => {
     });
     courseId = course.id;
 
-    const e1 = await prisma.enrollment.create({
+    await prisma.enrollment.create({
       data: { userId: student.id, courseId, status: EnrollmentStatus.ACTIVE },
     });
-    enrollmentStudent = { id: e1.id };
+    //enrollmentStudent = { id: e1.id };
 
-    const e2 = await prisma.enrollment.create({
+    await prisma.enrollment.create({
       data: { userId: otherStudent.id, courseId, status: EnrollmentStatus.ACTIVE },
     });
-    enrollmentOther = { id: e2.id };
+    //enrollmentOther = { id: e2.id };
   });
 
   // ---------------------------------------------------------------------------
@@ -296,9 +303,11 @@ describe('QuizService - integration', () => {
       const fetched = await service.getQuizForStudent(courseId, quiz.id, student.id);
       const q = fetched.questions[0];
       const correctOption = quiz.questions[0].options?.find((o) => o.isCorrect);
+      expect(correctOption).toBeDefined();
+      if (!correctOption) throw new Error('No correct option in test fixture');
 
       const attempt = await service.submitAttempt(courseId, quiz.id, student.id, {
-        answers: [{ questionId: q.id, selectedOptionIds: [correctOption!.id] }],
+        answers: [{ questionId: q.id, selectedOptionIds: [correctOption.id] }],
       });
 
       expect(attempt.score).toBe(100);
@@ -716,7 +725,7 @@ describe('QuizService - integration', () => {
       });
       expect(a3.score).toBe(50);
 
-      const scores = [a1.score!, a2.score!, a3.score!];
+      const scores = [a1.score, a2.score, a3.score].filter((s): s is number => s !== null);
       expect(Math.max(...scores)).toBe(100); // HIGHEST
       expect(scores[scores.length - 1]).toBe(50); // LATEST
       expect(scores.reduce((s, v) => s + v, 0) / scores.length).toBeCloseTo(66.67, 1); // AVERAGE
