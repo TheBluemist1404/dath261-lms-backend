@@ -390,13 +390,18 @@ describe('EnrollmentService - course roster - integration', () => {
       const roster = await service.listCourseRoster(lecturer.id, courseId, {});
       const row = roster.data.find((r) => r.enrollmentId === enrollment.id);
 
-      expect(row).toBeDefined();
-      expect(row!.progress.completedBlocks).toBe(studentProgress.progress.completedItems);
-      expect(row!.progress.totalBlocks).toBe(studentProgress.progress.totalItems);
-      expect(row!.progress.percent).toBe(studentProgress.progress.learningProgressPercentage);
+      expect(row).toEqual(
+        expect.objectContaining({
+          progress: {
+            completedBlocks: studentProgress.progress.completedItems,
+            totalBlocks: studentProgress.progress.totalItems,
+            percent: studentProgress.progress.learningProgressPercentage,
+          },
+        }),
+      );
 
       // sanity check values
-      expect(row!.progress).toEqual({
+      expect(row?.progress).toEqual({
         completedBlocks: 2,
         totalBlocks: 4,
         percent: 50,
@@ -411,7 +416,7 @@ describe('EnrollmentService - course roster - integration', () => {
       const roster = await service.listCourseRoster(lecturer.id, courseId, {});
       const row = roster.data.find((r) => r.enrollmentId === enrollment.id);
 
-      expect(row!.progress).toEqual({ completedBlocks: 0, totalBlocks: 0, percent: 0 });
+      expect(row?.progress).toEqual({ completedBlocks: 0, totalBlocks: 0, percent: 0 });
     });
   });
 
@@ -432,7 +437,7 @@ describe('EnrollmentService - course roster - integration', () => {
 
       const roster = await service.listCourseRoster(lecturer.id, courseId, {});
       const row = roster.data.find((r) => r.enrollmentId === enrollment.id);
-      expect(row!.quizScore).toBeNull();
+      expect(row?.quizScore).toBeNull();
     });
 
     it('uses HIGHEST across attempts', async () => {
@@ -515,8 +520,8 @@ describe('EnrollmentService - course roster - integration', () => {
       const rowAn = roster.data.find((r) => r.enrollmentId === enrollmentAn.id);
       const rowBinh = roster.data.find((r) => r.enrollmentId === enrollmentBinh.id);
 
-      expect(rowAn!.quizScore).toBe(100);
-      expect(rowBinh!.quizScore).toBeNull();
+      expect(rowAn?.quizScore).toBe(100);
+      expect(rowBinh?.quizScore).toBeNull();
     });
   });
 

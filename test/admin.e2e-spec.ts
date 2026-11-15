@@ -119,7 +119,10 @@ describe('Admin (e2e)', () => {
       const setCookie = loginBeforeSuspension.headers['set-cookie'];
       const refreshCookie = setCookie?.[0]?.split(';', 1)[0];
 
-      expect(refreshCookie).toBeDefined();
+      //expect(refreshCookie).toBeDefined();
+      if (!refreshCookie) {
+        throw new Error('Login response is missing the refresh cookie');
+      }
 
       // Admin suspends the target account.
       const suspended = await testApp
@@ -155,7 +158,7 @@ describe('Admin (e2e)', () => {
         .expect(403);
 
       // The old refresh token is rejected because the admin already revoked it.
-      await testApp.http().post('/api/auth/refresh').set('Cookie', refreshCookie!).expect(401);
+      await testApp.http().post('/api/auth/refresh').set('Cookie', refreshCookie).expect(401);
 
       // Admin reactivates the account.
       const reactivated = await testApp

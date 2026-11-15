@@ -532,7 +532,7 @@ describe('Quiz (e2e)', () => {
         },
       ]);
       const q = quiz.questions[0];
-      const correctIds = q.options!.filter((o) => o.isCorrect).map((o) => o.id);
+      const correctIds = (q.options ?? []).filter((o) => o.isCorrect).map((o) => o.id);
 
       // Missing one → 0
       const partial = await testApp
