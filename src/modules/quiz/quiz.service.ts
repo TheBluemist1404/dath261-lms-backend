@@ -15,6 +15,7 @@ import {
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
+import { NotificationService } from '../notification/notification.service.js';
 import { CreateQuizDto } from './dto/create-quiz.dto.js';
 import { PaginatedQuizAttemptResponseDto } from './dto/paginated-quiz-attempt-response.dto.js';
 import { QuizAttemptDetailResponseDto } from './dto/quiz-attempt-detail-response.dto.js';
@@ -64,6 +65,7 @@ export class QuizService {
     private readonly prisma: PrismaService,
     private readonly enrollmentService: EnrollmentService,
     private readonly gradingService: QuizGradingService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -265,23 +267,39 @@ export class QuizService {
     blockId: string,
     lecturerId: string,
   ): Promise<QuizResponseDto> {
-    await this.checkCourseOwnership(courseId, lecturerId);
+    const course = await this.checkCourseOwnership(courseId, lecturerId);
     const block = await this.loadQuizBlock(courseId, blockId);
 
     if (!block.quizConfig) {
       throw new NotFoundException('Quiz config not found.');
     }
 
-    const updated = await this.prisma.courseBlock.update({
-      where: { id: blockId },
-      data: {
-        quizConfig: {
-          update: {
-            resultsReleasedAt: block.quizConfig.resultsReleasedAt ?? new Date(),
+    const previousResultsReleasedAt = block.quizConfig.resultsReleasedAt;
+    // Only notify on the first release. Subsequent calls must be idempotent.
+    const wasAlreadyReleased = block.quizConfig.resultsReleasedAt !== null;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.courseBlock.update({
+        where: { id: blockId },
+        data: {
+          quizConfig: {
+            update: {
+              resultsReleasedAt: previousResultsReleasedAt ?? new Date(),
+            },
           },
         },
-      },
-      include: quizDefinitionInclude,
+        include: quizDefinitionInclude,
+      });
+
+      if (!wasAlreadyReleased) {
+        await this.notificationService.notifyResultReleased(
+          tx,
+          { id: course.id, title: course.title },
+          { id: block.id, title: block.title },
+        );
+      }
+
+      return result;
     });
 
     return this.toLecturerQuizResponse(updated);
@@ -529,7 +547,7 @@ export class QuizService {
   private async checkCourseOwnership(courseId: string, lecturerId: string) {
     const course = await this.prisma.course.findUnique({
       where: { id: courseId },
-      select: { id: true, lecturerId: true },
+      select: { id: true, lecturerId: true, title: true },
     });
 
     if (!course) {

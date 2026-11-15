@@ -2,12 +2,13 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../infrastructure/database/prisma/prisma.module.js';
 import { EnrollmentModule } from '../enrollments/enrollment.module.js';
+import { NotificationModule } from '../notification/notification.module.js';
 import { QuizController } from './quiz.controller.js';
 import { QuizService } from './quiz.service.js';
 import { QuizGradingService } from './quiz-grading.service.js';
 
 @Module({
-  imports: [PrismaModule, EnrollmentModule],
+  imports: [PrismaModule, EnrollmentModule, NotificationModule],
   controllers: [QuizController],
   providers: [QuizService, QuizGradingService],
   exports: [QuizService, QuizGradingService],
