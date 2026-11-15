@@ -14,6 +14,7 @@ import {
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { NotificationService } from '../notification/notification.service.js';
 import { CourseOutlineItemDto } from './dto/course-outline.dto.js';
 import { CourseQueryDto } from './dto/course-query.dto.js';
 import { CourseResponseDto } from './dto/course-response.dto.js';
@@ -30,6 +31,7 @@ export class CourseService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -313,6 +315,16 @@ export class CourseService {
         },
         tx,
       );
+
+      // NEW_CONTENT: notify ACTIVE enrollees when a course transitions into
+      // PUBLISHED. First-time publishes usually have no enrollees, so this is a
+      // no-op for them; it matters on re-publish.
+      if (dto.status === CourseStatus.PUBLISHED && course.status !== CourseStatus.PUBLISHED) {
+        await this.notificationService.notifyNewContentOnPublish(tx, {
+          id: result.id,
+          title: result.title,
+        });
+      }
 
       return result;
     });
