@@ -11,6 +11,7 @@ import {
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { NotificationService } from '../notification/notification.service.js';
 import { CourseService } from './course.service.js';
 import type { CourseQueryDto } from './dto/course-query.dto.js';
 import type { CreateCourseDto } from './dto/create-course.dto.js';
@@ -51,6 +52,11 @@ const lecturerInclude = {
 const mockAuditService = {
   record: vi.fn(),
 };
+const mockNotificationService = {
+  notifyNewContentOnPublish: vi.fn().mockResolvedValue({ created: 0 }),
+  notifyNewContentOnBlockAdded: vi.fn().mockResolvedValue({ created: 0 }),
+  notifyResultReleased: vi.fn().mockResolvedValue({ created: 0 }),
+};
 
 // ---------------------------------------------------------------------------
 // findAllByLecturer
@@ -72,6 +78,7 @@ describe('CourseService - findAllByLecturer', () => {
         CourseService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: NotificationService, useValue: mockNotificationService },
       ],
     }).compile();
 
@@ -156,14 +163,13 @@ describe('CourseService - findAllPublished', () => {
         CourseService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: NotificationService, useValue: mockNotificationService },
       ],
     }).compile();
 
     service = module.get<CourseService>(CourseService);
     vi.clearAllMocks();
 
-    // Default: $transaction([countPromise, findManyPromise]) → resolve to [total, rows]
-    // We wire it so tests only need to mock count & findMany.
     mockPrisma.$transaction.mockImplementation(async (ops: Promise<unknown>[]) => Promise.all(ops));
   });
 
@@ -327,6 +333,7 @@ describe('CourseService - findOne', () => {
         CourseService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: NotificationService, useValue: mockNotificationService },
       ],
     }).compile();
 
@@ -440,6 +447,7 @@ describe('CourseService - findOutline', () => {
         CourseService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: NotificationService, useValue: mockNotificationService },
       ],
     }).compile();
 
@@ -510,7 +518,6 @@ describe('CourseService - findOutline', () => {
     });
 
     mockPrisma.courseBlock.findMany.mockResolvedValue([
-      // Roots out of order to prove sorting
       {
         id: 'mod-2',
         type: BlockType.MODULE,
@@ -525,7 +532,6 @@ describe('CourseService - findOutline', () => {
         position: 0,
         parentModuleId: null,
       },
-      // Children out of order
       {
         id: 'c-2',
         type: BlockType.TEXT,
@@ -571,7 +577,6 @@ describe('CourseService - findOutline', () => {
       },
     ]);
 
-    // Explicit guard: no content leak on any node.
     for (const root of result) {
       expect(root).not.toHaveProperty('content');
       for (const child of root.children) {
@@ -602,6 +607,7 @@ describe('CourseService - create', () => {
         CourseService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: NotificationService, useValue: mockNotificationService },
       ],
     }).compile();
 
@@ -721,6 +727,7 @@ describe('CourseService - update', () => {
         CourseService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: NotificationService, useValue: mockNotificationService },
       ],
     }).compile();
 
@@ -873,6 +880,7 @@ describe('CourseService - updateStatus', () => {
         CourseService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: NotificationService, useValue: mockNotificationService },
       ],
     }).compile();
 

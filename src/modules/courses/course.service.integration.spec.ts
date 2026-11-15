@@ -13,6 +13,7 @@ import {
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { NotificationService } from '../notification/notification.service.js';
 import { CourseService } from './course.service.js';
 import type { CourseQueryDto } from './dto/course-query.dto.js';
 
@@ -34,7 +35,7 @@ describe('CourseService - integration', () => {
           envFilePath: '.env',
         }),
       ],
-      providers: [PrismaService, CourseService, AuditService],
+      providers: [PrismaService, CourseService, AuditService, NotificationService],
     }).compile();
 
     prisma = moduleRef.get(PrismaService);
