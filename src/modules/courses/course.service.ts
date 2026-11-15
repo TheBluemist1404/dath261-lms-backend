@@ -14,6 +14,7 @@ import {
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { CourseOutlineItemDto } from './dto/course-outline.dto.js';
 import { CourseQueryDto } from './dto/course-query.dto.js';
 import { CourseResponseDto } from './dto/course-response.dto.js';
 import { CreateCourseDto } from './dto/create-course.dto.js';
@@ -99,7 +100,7 @@ export class CourseService {
     };
   }
 
-  async findOne(courseId: string, requesterId: string): Promise<CourseResponseDto> {
+  async findOne(courseId: string, requesterId?: string): Promise<CourseResponseDto> {
     const course = await this.prisma.course.findUnique({
       where: { id: courseId },
       include: this.lecturerInclude,
@@ -109,7 +110,7 @@ export class CourseService {
       throw new NotFoundException('Course not found.');
     }
 
-    const isOwner = course.lecturerId === requesterId;
+    const isOwner = requesterId !== undefined && course.lecturerId === requesterId;
 
     // Draft and suspended courses are hidden from non-owners. They get the same
     // 404 as a missing course, so a course id does not reveal that it exists.
@@ -119,6 +120,52 @@ export class CourseService {
     }
 
     return this.toResponseDto(course);
+  }
+
+  async findOutline(courseId: string): Promise<CourseOutlineItemDto[]> {
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+      select: { id: true, status: true, isSuspended: true },
+    });
+
+    if (!course || course.status !== CourseStatus.PUBLISHED || course.isSuspended) {
+      throw new NotFoundException('Course not found.');
+    }
+
+    const blocks = await this.prisma.courseBlock.findMany({
+      where: { courseId },
+      select: { id: true, type: true, title: true, position: true, parentModuleId: true },
+      orderBy: [{ parentModuleId: 'asc' }, { position: 'asc' }],
+    });
+
+    // Group children by parentModuleId
+    const childrenByParent = new Map<string, typeof blocks>();
+    for (const block of blocks) {
+      if (block.parentModuleId) {
+        const list = childrenByParent.get(block.parentModuleId) ?? [];
+        list.push(block);
+        childrenByParent.set(block.parentModuleId, list);
+      }
+    }
+
+    // Roots = parentModuleId null, sorted by position
+    return blocks
+      .filter((b) => b.parentModuleId === null)
+      .sort((a, b) => a.position - b.position)
+      .map((root) => ({
+        id: root.id,
+        type: root.type,
+        title: root.title,
+        position: root.position,
+        children: (childrenByParent.get(root.id) ?? [])
+          .sort((a, b) => a.position - b.position)
+          .map((child) => ({
+            id: child.id,
+            type: child.type,
+            title: child.title,
+            position: child.position,
+          })),
+      }));
   }
 
   // ---------------------------------------------------------------------------

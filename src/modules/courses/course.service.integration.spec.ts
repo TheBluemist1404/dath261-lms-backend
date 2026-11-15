@@ -2,6 +2,7 @@
 import { ConfigModule } from '@nestjs/config';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { Prisma } from '../../generated/prisma/client.js';
 import {
   AuditAction,
   AuditEntityType,
@@ -463,6 +464,204 @@ describe('CourseService - integration', () => {
       await expect(service.findOne('non-existent-course', lecturerA.id)).rejects.toThrow(
         'Course not found.',
       );
+    });
+
+    // -------------------------------------------------------------------------
+    // Guest (no requesterId) — added with the optional-auth change
+    // -------------------------------------------------------------------------
+    it('should let a guest read a PUBLISHED non-suspended course', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+      });
+
+      const result = await service.findOne(course.id);
+
+      expect(result.id).toBe(course.id);
+      expect(result.lecturer).toEqual({ id: lecturerA.id, name: 'Nguyen An' });
+    });
+
+    it('should throw NotFoundException when a guest reads a DRAFT course', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.DRAFT,
+      });
+
+      await expect(service.findOne(course.id)).rejects.toThrow('Course not found.');
+    });
+
+    it('should throw NotFoundException when a guest reads a suspended course', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+        isSuspended: true,
+      });
+
+      await expect(service.findOne(course.id)).rejects.toThrow('Course not found.');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // findOutline
+  // ---------------------------------------------------------------------------
+  describe('findOutline', () => {
+    async function createBlock(overrides: {
+      courseId: string;
+      type: BlockType;
+      title: string;
+      position: number;
+      parentModuleId?: string | null;
+      content?: Prisma.InputJsonValue;
+    }) {
+      return prisma.courseBlock.create({
+        data: {
+          courseId: overrides.courseId,
+          type: overrides.type,
+          title: overrides.title,
+          position: overrides.position,
+          parentModuleId: overrides.parentModuleId ?? null,
+          ...(overrides.content !== undefined && { content: overrides.content }),
+        },
+      });
+    }
+
+    it('should throw NotFoundException when course does not exist', async () => {
+      await expect(service.findOutline('non-existent-course')).rejects.toThrow('Course not found.');
+    });
+
+    it('should throw NotFoundException for a DRAFT course, even for its owner', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.DRAFT,
+      });
+
+      await expect(service.findOutline(course.id)).rejects.toThrow('Course not found.');
+    });
+
+    it('should throw NotFoundException for a suspended course', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+        isSuspended: true,
+      });
+
+      await expect(service.findOutline(course.id)).rejects.toThrow('Course not found.');
+    });
+
+    it('should return an empty array when a published course has no blocks', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+      });
+
+      const result = await service.findOutline(course.id);
+
+      expect(result).toEqual([]);
+    });
+
+    it('should return the ordered 2-level tree and never leak block content', async () => {
+      const course = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+      });
+
+      const week2 = await createBlock({
+        courseId: course.id,
+        type: BlockType.MODULE,
+        title: 'Week 2',
+        position: 1,
+      });
+      const week1 = await createBlock({
+        courseId: course.id,
+        type: BlockType.MODULE,
+        title: 'Week 1',
+        position: 0,
+      });
+
+      // Insert children in an order that differs from their position to prove sorting.
+      const setup = await createBlock({
+        courseId: course.id,
+        type: BlockType.TEXT,
+        title: 'Setup',
+        position: 1,
+        parentModuleId: week1.id,
+        content: { text: 'SECRET BODY' },
+      });
+      const intro = await createBlock({
+        courseId: course.id,
+        type: BlockType.VIDEO,
+        title: 'Intro',
+        position: 0,
+        parentModuleId: week1.id,
+        content: { url: 'https://example.com/secret.mp4' },
+      });
+      const quiz = await createBlock({
+        courseId: course.id,
+        type: BlockType.QUIZ,
+        title: 'Quiz 1',
+        position: 0,
+        parentModuleId: week2.id,
+        content: { questions: [{ answer: 'SECRET' }] },
+      });
+
+      const result = await service.findOutline(course.id);
+
+      expect(result).toEqual([
+        {
+          id: week1.id,
+          type: BlockType.MODULE,
+          title: 'Week 1',
+          position: 0,
+          children: [
+            { id: intro.id, type: BlockType.VIDEO, title: 'Intro', position: 0 },
+            { id: setup.id, type: BlockType.TEXT, title: 'Setup', position: 1 },
+          ],
+        },
+        {
+          id: week2.id,
+          type: BlockType.MODULE,
+          title: 'Week 2',
+          position: 1,
+          children: [{ id: quiz.id, type: BlockType.QUIZ, title: 'Quiz 1', position: 0 }],
+        },
+      ]);
+
+      // No content leak anywhere in the tree.
+      for (const root of result) {
+        expect(root).not.toHaveProperty('content');
+        for (const child of root.children) {
+          expect(child).not.toHaveProperty('content');
+        }
+      }
+    });
+
+    it('should not include blocks from other courses', async () => {
+      const publishedCourse = await createCourse({
+        lecturerId: lecturerA.id,
+        status: CourseStatus.PUBLISHED,
+      });
+      const otherCourse = await createCourse({
+        lecturerId: lecturerB.id,
+        status: CourseStatus.PUBLISHED,
+      });
+
+      const ownModule = await createBlock({
+        courseId: publishedCourse.id,
+        type: BlockType.MODULE,
+        title: 'Own',
+        position: 0,
+      });
+      await createBlock({
+        courseId: otherCourse.id,
+        type: BlockType.MODULE,
+        title: 'Foreign',
+        position: 0,
+      });
+
+      const result = await service.findOutline(publishedCourse.id);
+
+      expect(result.map((r) => r.id)).toEqual([ownModule.id]);
+      expect(result.map((r) => r.title)).toEqual(['Own']);
     });
   });
 

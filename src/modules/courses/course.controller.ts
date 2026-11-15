@@ -25,11 +25,13 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { UserRole } from '../../generated/prisma/enums.js';
+import { OptionalAuth } from '../auth/decorators/optional-auth.decorator.js';
 import { Public } from '../auth/decorators/public.decorator.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { Roles } from '../authorization/roles.decorator.js';
 import { RolesGuard } from '../authorization/roles.guard.js';
 import { CourseService } from './course.service.js';
+import { CourseOutlineItemDto } from './dto/course-outline.dto.js';
 import { CourseQueryDto } from './dto/course-query.dto.js';
 import { CourseResponseDto } from './dto/course-response.dto.js';
 import { CreateCourseDto } from './dto/create-course.dto.js';
@@ -76,22 +78,35 @@ export class CourseController {
   }
 
   @Get(':courseId')
+  @OptionalAuth()
   @ApiOperation({
     summary: 'Get a specific course by ID',
     description:
-      'The owner lecturer can always access the course. Other users can only access it if the course is PUBLISHED and not suspended.',
+      'Guests can read PUBLISHED, non-suspended courses (404 otherwise). Signed-in callers keep existing behaviour (owner sees drafts).',
   })
-  @ApiParam({ name: 'courseId', description: 'The ID of the course', example: 'clx123abc' })
   @ApiOkResponse({
     description: 'Course retrieved successfully.',
     type: CourseResponseDto,
   })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token.' })
   @ApiNotFoundResponse({
-    description: 'Course not found, or a draft or suspended course the caller does not own.',
+    description: 'Course not found, or draft/suspended course for non-owner/guest.',
   })
-  findOne(@Param('courseId') courseId: string, @Req() req: { user: AuthenticatedUser }) {
-    return this.courseService.findOne(courseId, req.user.userId);
+  findOne(@Param('courseId') courseId: string, @Req() req: { user?: AuthenticatedUser }) {
+    return this.courseService.findOne(courseId, req.user?.userId);
+  }
+
+  @Get(':courseId/outline')
+  @Public()
+  @ApiOperation({
+    summary: 'Get the ordered syllabus (metadata only) of a published course',
+    description:
+      'Returns the ordered block tree (id, type, title, position, children) for a PUBLISHED, non-suspended course. No content or quiz data. 404 otherwise.',
+  })
+  @ApiOkResponse({ type: [CourseOutlineItemDto] })
+  @ApiNotFoundResponse({ description: 'Course not found, or draft/suspended course.' })
+  findOutline(@Param('courseId') courseId: string) {
+    return this.courseService.findOutline(courseId);
   }
 
   @Post()
