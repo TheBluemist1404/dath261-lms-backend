@@ -240,6 +240,53 @@ describe('QuizService - integration', () => {
       expect(single?.options.filter((o) => o.isCorrect)).toHaveLength(1);
     });
 
+    it('should notify ACTIVE enrollees when creating a quiz in a PUBLISHED, non-suspended course', async () => {
+      // beforeEach already sets up a PUBLISHED course with 2 ACTIVE enrollees.
+      const quiz = await createQuiz();
+    
+      const notifs = await prisma.notification.findMany({
+        where: {
+          targetType: 'COURSE_BLOCK',
+          targetId: quiz.id,
+        },
+      });
+    
+      // Both enrolled students should receive one notification each.
+      expect(notifs).toHaveLength(2);
+      expect(notifs.every((n) => n.type === 'NEW_CONTENT')).toBe(true);
+      const userIds = notifs.map((n) => n.userId).sort();
+      expect(userIds).toEqual([student.id, otherStudent.id].sort());
+    });
+
+    it('should NOT notify when creating a quiz in a DRAFT course', async () => {
+      // Override course to DRAFT for this test.
+      await prisma.course.update({
+        where: { id: courseId },
+        data: { status: CourseStatus.DRAFT },
+      });
+    
+      const quiz = await createQuiz();
+    
+      const count = await prisma.notification.count({
+        where: { targetType: 'COURSE_BLOCK', targetId: quiz.id },
+      });
+      expect(count).toBe(0);
+    });
+
+    it('should NOT notify when creating a quiz in a suspended course', async () => {
+      await prisma.course.update({
+        where: { id: courseId },
+        data: { status: CourseStatus.PUBLISHED, isSuspended: true },
+      });
+    
+      const quiz = await createQuiz();
+    
+      const count = await prisma.notification.count({
+        where: { targetType: 'COURSE_BLOCK', targetId: quiz.id },
+      });
+      expect(count).toBe(0);
+    });
+
     it('rejects when course does not belong to the lecturer', async () => {
       await expect(
         service.createQuiz(courseId, otherLecturer.id, {

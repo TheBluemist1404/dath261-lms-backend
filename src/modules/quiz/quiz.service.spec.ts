@@ -9,6 +9,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { vi } from 'vitest';
 import {
   BlockType,
+  CourseStatus,
   QuestionType,
   QuizAttemptStatus,
   QuizScoringMode,
@@ -26,6 +27,9 @@ import { QuizGradingService } from './quiz-grading.service.js';
 const buildCourse = (overrides: Record<string, unknown> = {}) => ({
   id: 'course-1',
   lecturerId: 'lecturer-1',
+  title: 'Course',
+  status: CourseStatus.DRAFT,
+  isSuspended: false,
   ...overrides,
 });
 
@@ -355,6 +359,43 @@ describe('QuizService', () => {
           }),
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    // -----------------------------------------------------------------------
+    // NEW_CONTENT notification hook
+    // -----------------------------------------------------------------------
+    it('should notify ACTIVE enrollees when creating a quiz in a PUBLISHED, non-suspended course', async () => {
+      mockPrisma.course.findUnique.mockResolvedValue(
+        buildCourse({ status: CourseStatus.PUBLISHED, isSuspended: false }),
+      );
+
+      await service.createQuiz('course-1', 'lecturer-1', buildDto());
+
+      expect(mockNotification.notifyNewContentOnBlockAdded).toHaveBeenCalledWith(
+        expect.anything(), // tx
+        { id: 'course-1', title: 'Course' },
+        { id: 'block-1', title: 'Quiz' },
+      );
+    });
+
+    it('should NOT notify when creating a quiz in a DRAFT course', async () => {
+      mockPrisma.course.findUnique.mockResolvedValue(
+        buildCourse({ status: CourseStatus.DRAFT, isSuspended: false }),
+      );
+
+      await service.createQuiz('course-1', 'lecturer-1', buildDto());
+
+      expect(mockNotification.notifyNewContentOnBlockAdded).not.toHaveBeenCalled();
+    });
+
+    it('should NOT notify when creating a quiz in a suspended course', async () => {
+      mockPrisma.course.findUnique.mockResolvedValue(
+        buildCourse({ status: CourseStatus.PUBLISHED, isSuspended: true }),
+      );
+
+      await service.createQuiz('course-1', 'lecturer-1', buildDto());
+
+      expect(mockNotification.notifyNewContentOnBlockAdded).not.toHaveBeenCalled();
     });
   });
 

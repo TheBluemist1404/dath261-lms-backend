@@ -12,6 +12,7 @@ import {
   QuestionType,
   QuizAttemptStatus,
   QuizScoringMode,
+  CourseStatus,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
@@ -77,16 +78,16 @@ export class QuizService {
     lecturerId: string,
     dto: CreateQuizDto,
   ): Promise<QuizResponseDto> {
-    await this.checkCourseOwnership(courseId, lecturerId);
-
+    const course = await this.checkCourseOwnership(courseId, lecturerId);
+  
     this.assertValidQuestions(dto.questions);
     const availableFrom = dto.availableFrom ? new Date(dto.availableFrom) : null;
     const deadline = dto.deadline ? new Date(dto.deadline) : null;
     this.assertValidWindow(availableFrom, deadline);
-
+  
     const created = await this.prisma.$transaction(async (tx) => {
       const position = await this.nextBlockPosition(tx, courseId, null);
-
+  
       const block = await tx.courseBlock.create({
         data: {
           courseId,
@@ -130,10 +131,19 @@ export class QuizService {
         },
         include: quizDefinitionInclude,
       });
-
+  
+      // NEW_CONTENT: quiz is a block, so adding one to a PUBLISHED, non-suspended
+      if (course.status === CourseStatus.PUBLISHED && !course.isSuspended) {
+        await this.notificationService.notifyNewContentOnBlockAdded(
+          tx,
+          { id: course.id, title: course.title },
+          { id: block.id, title: block.title },
+        );
+      }
+  
       return block;
     });
-
+  
     return this.toLecturerQuizResponse(created);
   }
 
@@ -547,7 +557,7 @@ export class QuizService {
   private async checkCourseOwnership(courseId: string, lecturerId: string) {
     const course = await this.prisma.course.findUnique({
       where: { id: courseId },
-      select: { id: true, lecturerId: true, title: true },
+      select: { id: true, lecturerId: true, title: true, status: true, isSuspended: true },
     });
 
     if (!course) {
