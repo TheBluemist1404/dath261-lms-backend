@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ReportTargetType, WorkspaceType } from '../../generated/prisma/enums.js';
+import { CourseStatus, ReportTargetType, WorkspaceType } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { CollaborationService } from '../collaboration/collaboration.service.js';
 import { type PageAccess, PagesService } from '../pages/pages.service.js';
@@ -57,7 +57,11 @@ export class DiscussionService {
 
     const message = toResponse(
       await this.prisma.message.create({
-        data: { pageId: access.page.id, senderId: userId, content: dto.content },
+        data: {
+          pageId: access.page.id,
+          senderId: userId,
+          content: dto.content,
+        },
         include: messageInclude,
       }),
     );
@@ -66,37 +70,102 @@ export class DiscussionService {
   }
 
   async report(userId: string, dto: CreateReportDto): Promise<ReportResponseDto> {
-    const message = await this.prisma.message.findUnique({
-      where: { id: dto.targetId },
-      select: {
-        id: true,
-        senderId: true,
-        page: {
+    let targetId: string;
+
+    switch (dto.targetType) {
+      case ReportTargetType.MESSAGE: {
+        const message = await this.prisma.message.findUnique({
+          where: { id: dto.targetId },
           select: {
-            workspace: {
-              select: { memberships: { where: { userId }, select: { id: true } } },
+            id: true,
+            senderId: true,
+            page: {
+              select: {
+                workspace: {
+                  select: {
+                    memberships: {
+                      where: { userId },
+                      select: { id: true },
+                    },
+                  },
+                },
+              },
             },
           },
-        },
-      },
-    });
-    // Only members who can see the message may report it.
-    if (!message || message.page.workspace.memberships.length === 0) {
-      throw new NotFoundException('Message not found');
-    }
-    if (message.senderId === userId) {
-      throw new BadRequestException('You cannot report your own message');
+        });
+
+        // Only members who can see the message may report it.
+        if (!message || message.page.workspace.memberships.length === 0) {
+          throw new NotFoundException('Message not found');
+        }
+
+        if (message.senderId === userId) {
+          throw new BadRequestException('You cannot report your own message');
+        }
+
+        targetId = message.id;
+        break;
+      }
+
+      case ReportTargetType.USER: {
+        const targetUser = await this.prisma.user.findUnique({
+          where: { id: dto.targetId },
+          select: {
+            id: true,
+          },
+        });
+
+        if (!targetUser) {
+          throw new NotFoundException('User not found');
+        }
+
+        if (targetUser.id === userId) {
+          throw new BadRequestException('You cannot report yourself');
+        }
+
+        targetId = targetUser.id;
+        break;
+      }
+
+      case ReportTargetType.COURSE: {
+        const course = await this.prisma.course.findUnique({
+          where: { id: dto.targetId },
+          select: {
+            id: true,
+            lecturerId: true,
+            status: true,
+            isSuspended: true,
+          },
+        });
+
+        if (!course || course.status !== CourseStatus.PUBLISHED || course.isSuspended) {
+          throw new NotFoundException('Course not found');
+        }
+
+        if (course.lecturerId === userId) {
+          throw new BadRequestException('You cannot report a course you own');
+        }
+
+        targetId = course.id;
+        break;
+      }
+
+      default:
+        throw new BadRequestException('Unsupported report target');
     }
 
     return this.prisma.report.create({
       data: {
         reporterId: userId,
-        targetType: ReportTargetType.MESSAGE,
-        targetId: message.id,
+        targetType: dto.targetType,
+        targetId,
         reason: dto.reason,
         description: dto.description || null,
       },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+      },
     });
   }
 

@@ -1,4 +1,12 @@
-import { AccountStatus, BlockType, CourseStatus } from '../src/generated/prisma/enums.js';
+import {
+  AccountStatus,
+  AuditAction,
+  AuditEntityType,
+  BlockType,
+  CourseStatus,
+  ReportStatus,
+  ReportTargetType,
+} from '../src/generated/prisma/enums.js';
 import { createCourse, enroll } from './support/courses.js';
 import { createTestApp, resetDatabase, type TestApp } from './support/test-app.js';
 import { createAdmin, registerUser, type TestUser } from './support/users.js';
@@ -311,6 +319,218 @@ describe('Admin (e2e)', () => {
         .patch('/api/admin/courses/non-existent-course/suspension')
         .set(admin.auth)
         .send({ suspended: true })
+        .expect(404);
+    });
+  });
+
+  describe('report moderation', () => {
+    it('should return 401 without authentication on all report endpoints', async () => {
+      await testApp.http().get('/api/admin/reports').expect(401);
+
+      await testApp.http().get('/api/admin/reports/non-existent-report').expect(401);
+
+      await testApp
+        .http()
+        .patch('/api/admin/reports/non-existent-report/status')
+        .send({
+          status: ReportStatus.DISMISSED,
+          reason: 'Not a violation',
+        })
+        .expect(401);
+    });
+
+    it.each([
+      {
+        role: 'student',
+        auth: () => student.auth,
+      },
+      {
+        role: 'lecturer',
+        auth: () => lecturer.auth,
+      },
+    ])('should return 403 for a non-admin $role on every report endpoint', async ({ auth }) => {
+      await testApp.http().get('/api/admin/reports').set(auth()).expect(403);
+
+      await testApp.http().get('/api/admin/reports/non-existent-report').set(auth()).expect(403);
+
+      await testApp
+        .http()
+        .patch('/api/admin/reports/non-existent-report/status')
+        .set(auth())
+        .send({
+          status: ReportStatus.DISMISSED,
+          reason: 'Not a violation',
+        })
+        .expect(403);
+    });
+
+    it('should filter reports, review a pending report, and persist its audit history', async () => {
+      const admin = await createAdmin(testApp);
+
+      const pendingReport = await testApp.prisma.report.create({
+        data: {
+          reporterId: student.id,
+          targetType: ReportTargetType.USER,
+          targetId: lecturer.id,
+          reason: 'Harassment',
+          description: 'Repeated inappropriate behavior',
+          status: ReportStatus.PENDING,
+        },
+      });
+
+      await testApp.prisma.report.create({
+        data: {
+          reporterId: student.id,
+          targetType: ReportTargetType.USER,
+          targetId: lecturer.id,
+          reason: 'Already reviewed',
+          status: ReportStatus.DISMISSED,
+          reviewedAt: new Date(),
+        },
+      });
+
+      // Filter by both status and target type.
+      const listResponse = await testApp
+        .http()
+        .get('/api/admin/reports')
+        .set(admin.auth)
+        .query({
+          status: ReportStatus.PENDING,
+          targetType: ReportTargetType.USER,
+          page: 1,
+          pageSize: 20,
+        })
+        .expect(200);
+
+      expect(listResponse.body).toMatchObject({
+        page: 1,
+        pageSize: 20,
+        total: 1,
+      });
+
+      expect(listResponse.body.items).toHaveLength(1);
+
+      expect(listResponse.body.items[0]).toMatchObject({
+        id: pendingReport.id,
+        status: ReportStatus.PENDING,
+        reason: 'Harassment',
+        description: 'Repeated inappropriate behavior',
+        reporter: {
+          id: student.id,
+        },
+        target: {
+          type: ReportTargetType.USER,
+          id: lecturer.id,
+          available: true,
+        },
+      });
+
+      // Review the pending report.
+      const reviewResponse = await testApp
+        .http()
+        .patch(`/api/admin/reports/${pendingReport.id}/status`)
+        .set(admin.auth)
+        .send({
+          status: ReportStatus.DISMISSED,
+          reason: 'The report does not violate platform policy',
+        })
+        .expect(200);
+
+      expect(reviewResponse.body).toMatchObject({
+        id: pendingReport.id,
+        status: ReportStatus.DISMISSED,
+        reason: 'Harassment',
+      });
+
+      const persistedReport = await testApp.prisma.report.findUniqueOrThrow({
+        where: { id: pendingReport.id },
+      });
+
+      expect(persistedReport.status).toBe(ReportStatus.DISMISSED);
+      expect(persistedReport.reviewedAt).toBeInstanceOf(Date);
+
+      // Verify audit entry and recorded review reason.
+      const auditEntry = await testApp.prisma.auditEntry.findFirst({
+        where: {
+          actorId: admin.id,
+          action: AuditAction.REPORT_REVIEWED,
+          entityType: AuditEntityType.REPORT,
+          entityId: pendingReport.id,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      expect(auditEntry).not.toBeNull();
+      expect(auditEntry?.metadata).toMatchObject({
+        status: ReportStatus.DISMISSED,
+        reason: 'The report does not violate platform policy',
+      });
+
+      // The report cannot be reviewed a second time.
+      await testApp
+        .http()
+        .patch(`/api/admin/reports/${pendingReport.id}/status`)
+        .set(admin.auth)
+        .send({
+          status: ReportStatus.ACTION_TAKEN,
+          reason: 'Another review attempt',
+        })
+        .expect(409);
+
+      // The detail view contains the synthesized RECEIVED event and the
+      // persisted DISMISSED audit event.
+      const detailResponse = await testApp
+        .http()
+        .get(`/api/admin/reports/${pendingReport.id}`)
+        .set(admin.auth)
+        .expect(200);
+
+      expect(detailResponse.body.history).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: `received:${pendingReport.id}`,
+            action: 'RECEIVED',
+            actor: {
+              id: student.id,
+              name: expect.any(String),
+            },
+            reasonRecorded: 'Harassment',
+          }),
+          expect.objectContaining({
+            id: auditEntry?.id,
+            action: 'DISMISSED',
+            actor: {
+              id: admin.id,
+              name: expect.any(String),
+            },
+            reasonRecorded: 'The report does not violate platform policy',
+          }),
+        ]),
+      );
+
+      // USER reports do not return MESSAGE context.
+      expect(detailResponse.body).not.toHaveProperty('message');
+    });
+
+    it('should return 404 for a report that does not exist', async () => {
+      const admin = await createAdmin(testApp);
+
+      await testApp
+        .http()
+        .get('/api/admin/reports/non-existent-report')
+        .set(admin.auth)
+        .expect(404);
+
+      await testApp
+        .http()
+        .patch('/api/admin/reports/non-existent-report/status')
+        .set(admin.auth)
+        .send({
+          status: ReportStatus.DISMISSED,
+          reason: 'Not a violation',
+        })
         .expect(404);
     });
   });
