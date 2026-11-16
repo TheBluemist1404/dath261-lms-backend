@@ -243,14 +243,14 @@ describe('QuizService - integration', () => {
     it('should notify ACTIVE enrollees when creating a quiz in a PUBLISHED, non-suspended course', async () => {
       // beforeEach already sets up a PUBLISHED course with 2 ACTIVE enrollees.
       const quiz = await createQuiz();
-    
+
       const notifs = await prisma.notification.findMany({
         where: {
           targetType: 'COURSE_BLOCK',
           targetId: quiz.id,
         },
       });
-    
+
       // Both enrolled students should receive one notification each.
       expect(notifs).toHaveLength(2);
       expect(notifs.every((n) => n.type === 'NEW_CONTENT')).toBe(true);
@@ -264,9 +264,9 @@ describe('QuizService - integration', () => {
         where: { id: courseId },
         data: { status: CourseStatus.DRAFT },
       });
-    
+
       const quiz = await createQuiz();
-    
+
       const count = await prisma.notification.count({
         where: { targetType: 'COURSE_BLOCK', targetId: quiz.id },
       });
@@ -278,9 +278,9 @@ describe('QuizService - integration', () => {
         where: { id: courseId },
         data: { status: CourseStatus.PUBLISHED, isSuspended: true },
       });
-    
+
       const quiz = await createQuiz();
-    
+
       const count = await prisma.notification.count({
         where: { targetType: 'COURSE_BLOCK', targetId: quiz.id },
       });

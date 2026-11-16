@@ -9,10 +9,10 @@ import {
 import type { Prisma } from '../../generated/prisma/client.js';
 import {
   BlockType,
+  CourseStatus,
   QuestionType,
   QuizAttemptStatus,
   QuizScoringMode,
-  CourseStatus,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
@@ -79,15 +79,15 @@ export class QuizService {
     dto: CreateQuizDto,
   ): Promise<QuizResponseDto> {
     const course = await this.checkCourseOwnership(courseId, lecturerId);
-  
+
     this.assertValidQuestions(dto.questions);
     const availableFrom = dto.availableFrom ? new Date(dto.availableFrom) : null;
     const deadline = dto.deadline ? new Date(dto.deadline) : null;
     this.assertValidWindow(availableFrom, deadline);
-  
+
     const created = await this.prisma.$transaction(async (tx) => {
       const position = await this.nextBlockPosition(tx, courseId, null);
-  
+
       const block = await tx.courseBlock.create({
         data: {
           courseId,
@@ -131,7 +131,7 @@ export class QuizService {
         },
         include: quizDefinitionInclude,
       });
-  
+
       // NEW_CONTENT: quiz is a block, so adding one to a PUBLISHED, non-suspended
       if (course.status === CourseStatus.PUBLISHED && !course.isSuspended) {
         await this.notificationService.notifyNewContentOnBlockAdded(
@@ -140,10 +140,10 @@ export class QuizService {
           { id: block.id, title: block.title },
         );
       }
-  
+
       return block;
     });
-  
+
     return this.toLecturerQuizResponse(created);
   }
 
