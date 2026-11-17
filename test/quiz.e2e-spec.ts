@@ -3,10 +3,12 @@ import {
   BlockType,
   CourseStatus,
   EnrollmentStatus,
+  NotificationType,
   QuestionType,
   QuizAttemptStatus,
   QuizScoringMode,
 } from '../src/generated/prisma/enums.js';
+import { NOTIFICATION_TARGET_TYPE } from '../src/modules/notification/notification.constants.js';
 import { createTestApp, resetDatabase, type TestApp } from './support/test-app.js';
 import { registerUser, type TestUser } from './support/users.js';
 
@@ -15,6 +17,7 @@ describe('Quiz (e2e)', () => {
   let lecturer: TestUser;
   let otherLecturer: TestUser;
   let student: TestUser;
+  let studentLeft: TestUser;
   let outsider: TestUser;
   let courseId: string;
 
@@ -32,6 +35,7 @@ describe('Quiz (e2e)', () => {
     lecturer = await registerUser(testApp, 'LECTURER');
     otherLecturer = await registerUser(testApp, 'LECTURER');
     student = await registerUser(testApp, 'STUDENT');
+    studentLeft = await registerUser(testApp, 'STUDENT');
     outsider = await registerUser(testApp, 'STUDENT');
 
     // Deterministic display names (course/quiz response uses them).
@@ -55,6 +59,15 @@ describe('Quiz (e2e)', () => {
         userId: student.id,
         courseId,
         status: EnrollmentStatus.ACTIVE,
+      },
+    });
+
+    await testApp.prisma.enrollment.create({
+      data: {
+        userId: studentLeft.id,
+        courseId,
+        status: EnrollmentStatus.LEFT,
+        leftAt: new Date(),
       },
     });
   });
@@ -296,6 +309,59 @@ describe('Quiz (e2e)', () => {
         .send({ title: 'X', questions: [trueFalseQuestion()] })
         .expect(404);
     });
+
+    // ---------------------------------------------------------------------
+    // NEW_CONTENT notification hook
+    // ---------------------------------------------------------------------
+    it('should notify ACTIVE enrollees when a quiz is created in a PUBLISHED course', async () => {
+      const quiz = await createQuizViaApi();
+
+      const notifs = await testApp.prisma.notification.findMany({
+        where: {
+          type: NotificationType.NEW_CONTENT,
+          targetType: NOTIFICATION_TARGET_TYPE.COURSE_BLOCK,
+          targetId: quiz.id,
+        },
+      });
+
+      // Only the ACTIVE enrollee gets a notification; the LEFT one is skipped.
+      expect(notifs).toHaveLength(1);
+      expect(notifs[0].userId).toBe(student.id);
+    });
+
+    it('should NOT notify when a quiz is created in a DRAFT course', async () => {
+      await testApp.prisma.course.update({
+        where: { id: courseId },
+        data: { status: CourseStatus.DRAFT },
+      });
+
+      const quiz = await createQuizViaApi();
+
+      const count = await testApp.prisma.notification.count({
+        where: {
+          targetType: NOTIFICATION_TARGET_TYPE.COURSE_BLOCK,
+          targetId: quiz.id,
+        },
+      });
+      expect(count).toBe(0);
+    });
+
+    it('should NOT notify when a quiz is created in a suspended course', async () => {
+      await testApp.prisma.course.update({
+        where: { id: courseId },
+        data: { status: CourseStatus.PUBLISHED, isSuspended: true },
+      });
+
+      const quiz = await createQuizViaApi();
+
+      const count = await testApp.prisma.notification.count({
+        where: {
+          targetType: NOTIFICATION_TARGET_TYPE.COURSE_BLOCK,
+          targetId: quiz.id,
+        },
+      });
+      expect(count).toBe(0);
+    });
   });
 
   // ===========================================================================
@@ -532,7 +598,7 @@ describe('Quiz (e2e)', () => {
         },
       ]);
       const q = quiz.questions[0];
-      const correctIds = q.options!.filter((o) => o.isCorrect).map((o) => o.id);
+      const correctIds = (q.options ?? []).filter((o) => o.isCorrect).map((o) => o.id);
 
       // Missing one → 0
       const partial = await testApp

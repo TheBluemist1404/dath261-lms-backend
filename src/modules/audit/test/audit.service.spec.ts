@@ -1,7 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AuditEntry, Prisma } from '../../../generated/prisma/client.js';
+import type { /*AuditEntry,*/ Prisma } from '../../../generated/prisma/client.js';
 import { AuditAction, AuditEntityType } from '../../../generated/prisma/enums.js';
 import { PrismaService } from '../../../infrastructure/database/prisma/prisma.service.js';
 import { AuditService } from '../audit.service.js';

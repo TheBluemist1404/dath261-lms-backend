@@ -15,6 +15,7 @@ import { PrismaService } from '../../infrastructure/database/prisma/prisma.servi
 import { EnrollmentService } from '../../modules/enrollments/enrollment.service.js';
 import { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
+import { NotificationService } from '../notification/notification.service.js';
 import { CourseBlockService } from './course-block.service.js';
 
 const PREFIX = 'courseblock-integration-';
@@ -38,7 +39,13 @@ describe('CourseBlockService - integration', () => {
           envFilePath: '.env',
         }),
       ],
-      providers: [PrismaService, CourseBlockService, AuditService, EnrollmentService],
+      providers: [
+        PrismaService,
+        CourseBlockService,
+        AuditService,
+        EnrollmentService,
+        NotificationService,
+      ],
     }).compile();
 
     prisma = moduleRef.get(PrismaService);

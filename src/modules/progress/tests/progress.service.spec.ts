@@ -18,7 +18,7 @@ import { ProgressService } from './../progress.service.js';
 
 const USER_ID = 'student-1';
 const LECTURER_ID = 'lecturer-1';
-const OTHER_LECTURER_ID = 'lecturer-2';
+/*const OTHER_LECTURER_ID = 'lecturer-2';*/
 const COURSE_ID = 'course-1';
 const ENROLLMENT_ID = 'enrollment-1';
 

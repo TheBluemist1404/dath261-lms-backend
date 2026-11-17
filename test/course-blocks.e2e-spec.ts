@@ -10,7 +10,7 @@ describe('CourseBlock (e2e)', () => {
   let lecturerB: TestUser;
   let student: TestUser;
   let courseAId: string;
-  let courseBId: string;
+  //let courseBId: string;
 
   beforeAll(async () => {
     testApp = await createTestApp();
@@ -28,9 +28,9 @@ describe('CourseBlock (e2e)', () => {
     student = await registerUser(testApp, 'STUDENT');
 
     const courseA = await createCourse(testApp, { lecturerId: lecturerA.id });
-    const courseB = await createCourse(testApp, { lecturerId: lecturerB.id });
+    //const courseB = await createCourse(testApp, { lecturerId: lecturerB.id });
     courseAId = courseA.id;
-    courseBId = courseB.id;
+    //courseBId = courseB.id;
   });
 
   function createBlock(overrides: {

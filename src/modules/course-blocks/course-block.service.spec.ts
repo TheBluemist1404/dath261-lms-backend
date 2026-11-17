@@ -8,6 +8,7 @@ import { PrismaService } from '../../infrastructure/database/prisma/prisma.servi
 import { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
+import { NotificationService } from '../notification/notification.service.js';
 import { CourseBlockService } from './course-block.service.js';
 import type { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
 import type { UpdateCourseBlockDto } from './dto/update-course-block.dto.js';
@@ -20,6 +21,12 @@ const mockEnrollmentService = {
 // Service gọi auditService.record(payload, tx) — mock đúng method `record`.
 const mockAuditService = {
   record: vi.fn().mockResolvedValue(undefined),
+};
+
+const mockNotificationService = {
+  notifyNewContentOnPublish: vi.fn().mockResolvedValue({ created: 0 }),
+  notifyNewContentOnBlockAdded: vi.fn().mockResolvedValue({ created: 0 }),
+  notifyResultReleased: vi.fn().mockResolvedValue({ created: 0 }),
 };
 
 describe('CourseBlockService - findAll', () => {
@@ -47,6 +54,7 @@ describe('CourseBlockService - findAll', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrollmentService, useValue: mockEnrollmentService },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: NotificationService, useValue: mockNotificationService },
       ],
     }).compile();
 
@@ -183,6 +191,7 @@ describe('CourseBlockService - create (ownership pass)', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrollmentService, useValue: mockEnrollmentService },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: NotificationService, useValue: mockNotificationService },
       ],
     }).compile();
 
@@ -193,12 +202,16 @@ describe('CourseBlockService - create (ownership pass)', () => {
       _max: { position: null },
     });
 
+    // checkCourseOwnership queries the course with findUnique — include status/isSuspended
+    // so the notification hook has what it needs.
     mockPrisma.course.findUnique.mockResolvedValue({
       id: courseId,
-      lecturerId, //pass ownership check
+      lecturerId,
+      title: 'Course',
+      status: 'DRAFT',
+      isSuspended: false,
     });
 
-    // $transaction chạy callback với tx = mockPrisma
     mockPrisma.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) => {
       return cb(mockPrisma);
     });
@@ -313,6 +326,7 @@ describe('CourseBlockService - update', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrollmentService, useValue: mockEnrollmentService },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: NotificationService, useValue: mockNotificationService },
       ],
     }).compile();
 
@@ -322,6 +336,9 @@ describe('CourseBlockService - update', () => {
     mockPrisma.course.findUnique.mockResolvedValue({
       id: courseId,
       lecturerId,
+      title: 'Course',
+      status: 'DRAFT',
+      isSuspended: false,
     });
 
     mockPrisma.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) => {
@@ -610,6 +627,7 @@ describe('CourseBlockService - remove', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrollmentService, useValue: mockEnrollmentService },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: NotificationService, useValue: mockNotificationService },
       ],
     }).compile();
 
@@ -691,6 +709,7 @@ describe('CourseBlockService - reorder', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrollmentService, useValue: mockEnrollmentService },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: NotificationService, useValue: mockNotificationService },
       ],
     }).compile();
 

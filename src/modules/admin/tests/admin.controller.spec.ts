@@ -1,3 +1,4 @@
+// src/modules/admin/tests/admin.controller.spec.ts
 import { Test, type TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -45,7 +46,7 @@ describe('AdminController', () => {
       userId: 'admin-1',
       role: UserRole.ADMIN,
     },
-  };
+  } satisfies { user: { userId: string; role: UserRole } };
 
   it('should delegate user listing', async () => {
     const query = { page: 1, pageSize: 20 };
@@ -70,7 +71,7 @@ describe('AdminController', () => {
     const dto = { status: AccountStatus.SUSPENDED };
     mockAdminService.updateUserStatus.mockResolvedValue({ id: 'user-1' });
 
-    await controller.updateUserStatus('user-1', dto, request as any);
+    await controller.updateUserStatus('user-1', dto, request);
 
     expect(mockAdminService.updateUserStatus).toHaveBeenCalledWith('user-1', 'admin-1', dto);
   });
@@ -95,7 +96,7 @@ describe('AdminController', () => {
       id: 'course-1',
     });
 
-    await controller.updateCourseSuspension('course-1', dto, request as any);
+    await controller.updateCourseSuspension('course-1', dto, request);
 
     expect(mockAdminService.updateCourseSuspension).toHaveBeenCalledWith(
       'course-1',
@@ -151,9 +152,7 @@ describe('AdminController', () => {
 
     mockAdminService.reviewReport.mockResolvedValue(expected);
 
-    await expect(controller.reviewReport('report-1', dto, request as any)).resolves.toEqual(
-      expected,
-    );
+    await expect(controller.reviewReport('report-1', dto, request)).resolves.toEqual(expected);
 
     expect(mockAdminService.reviewReport).toHaveBeenCalledWith('report-1', 'admin-1', dto);
   });

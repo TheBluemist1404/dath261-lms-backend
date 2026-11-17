@@ -134,10 +134,10 @@ describe('EnrollmentController', () => {
         },
       };
 
-      const params = {
+      /*const params = {
         courseId,
         enrollmentId,
-      };
+      };*/
 
       const expectedResponse = {
         enrollmentId,

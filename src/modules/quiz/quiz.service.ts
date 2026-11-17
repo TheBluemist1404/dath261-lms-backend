@@ -9,12 +9,14 @@ import {
 import type { Prisma } from '../../generated/prisma/client.js';
 import {
   BlockType,
+  CourseStatus,
   QuestionType,
   QuizAttemptStatus,
   QuizScoringMode,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
+import { NotificationService } from '../notification/notification.service.js';
 import { CreateQuizDto } from './dto/create-quiz.dto.js';
 import { PaginatedQuizAttemptResponseDto } from './dto/paginated-quiz-attempt-response.dto.js';
 import { QuizAttemptDetailResponseDto } from './dto/quiz-attempt-detail-response.dto.js';
@@ -64,6 +66,7 @@ export class QuizService {
     private readonly prisma: PrismaService,
     private readonly enrollmentService: EnrollmentService,
     private readonly gradingService: QuizGradingService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -75,7 +78,7 @@ export class QuizService {
     lecturerId: string,
     dto: CreateQuizDto,
   ): Promise<QuizResponseDto> {
-    await this.checkCourseOwnership(courseId, lecturerId);
+    const course = await this.checkCourseOwnership(courseId, lecturerId);
 
     this.assertValidQuestions(dto.questions);
     const availableFrom = dto.availableFrom ? new Date(dto.availableFrom) : null;
@@ -128,6 +131,15 @@ export class QuizService {
         },
         include: quizDefinitionInclude,
       });
+
+      // NEW_CONTENT: quiz is a block, so adding one to a PUBLISHED, non-suspended
+      if (course.status === CourseStatus.PUBLISHED && !course.isSuspended) {
+        await this.notificationService.notifyNewContentOnBlockAdded(
+          tx,
+          { id: course.id, title: course.title },
+          { id: block.id, title: block.title },
+        );
+      }
 
       return block;
     });
@@ -265,23 +277,39 @@ export class QuizService {
     blockId: string,
     lecturerId: string,
   ): Promise<QuizResponseDto> {
-    await this.checkCourseOwnership(courseId, lecturerId);
+    const course = await this.checkCourseOwnership(courseId, lecturerId);
     const block = await this.loadQuizBlock(courseId, blockId);
 
     if (!block.quizConfig) {
       throw new NotFoundException('Quiz config not found.');
     }
 
-    const updated = await this.prisma.courseBlock.update({
-      where: { id: blockId },
-      data: {
-        quizConfig: {
-          update: {
-            resultsReleasedAt: block.quizConfig.resultsReleasedAt ?? new Date(),
+    const previousResultsReleasedAt = block.quizConfig.resultsReleasedAt;
+    // Only notify on the first release. Subsequent calls must be idempotent.
+    const wasAlreadyReleased = block.quizConfig.resultsReleasedAt !== null;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.courseBlock.update({
+        where: { id: blockId },
+        data: {
+          quizConfig: {
+            update: {
+              resultsReleasedAt: previousResultsReleasedAt ?? new Date(),
+            },
           },
         },
-      },
-      include: quizDefinitionInclude,
+        include: quizDefinitionInclude,
+      });
+
+      if (!wasAlreadyReleased) {
+        await this.notificationService.notifyResultReleased(
+          tx,
+          { id: course.id, title: course.title },
+          { id: block.id, title: block.title },
+        );
+      }
+
+      return result;
     });
 
     return this.toLecturerQuizResponse(updated);
@@ -529,7 +557,7 @@ export class QuizService {
   private async checkCourseOwnership(courseId: string, lecturerId: string) {
     const course = await this.prisma.course.findUnique({
       where: { id: courseId },
-      select: { id: true, lecturerId: true },
+      select: { id: true, lecturerId: true, title: true, status: true, isSuspended: true },
     });
 
     if (!course) {

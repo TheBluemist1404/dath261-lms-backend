@@ -9,12 +9,14 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { vi } from 'vitest';
 import {
   BlockType,
+  CourseStatus,
   QuestionType,
   QuizAttemptStatus,
   QuizScoringMode,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
+import { NotificationService } from '../notification/notification.service.js';
 import { CreateQuizDto } from './dto/create-quiz.dto.js';
 import { QuizService } from './quiz.service.js';
 import { QuizGradingService } from './quiz-grading.service.js';
@@ -25,6 +27,9 @@ import { QuizGradingService } from './quiz-grading.service.js';
 const buildCourse = (overrides: Record<string, unknown> = {}) => ({
   id: 'course-1',
   lecturerId: 'lecturer-1',
+  title: 'Course',
+  status: CourseStatus.DRAFT,
+  isSuspended: false,
   ...overrides,
 });
 
@@ -124,18 +129,26 @@ const createMocks = () => {
     assertCanAccessCourse: vi.fn(),
   };
 
-  return { mockPrisma, mockEnrollment };
+  const mockNotification = {
+    notifyNewContentOnPublish: vi.fn().mockResolvedValue({ created: 0 }),
+    notifyNewContentOnBlockAdded: vi.fn().mockResolvedValue({ created: 0 }),
+    notifyResultReleased: vi.fn().mockResolvedValue({ created: 0 }),
+  };
+
+  return { mockPrisma, mockEnrollment, mockNotification };
 };
 
 describe('QuizService', () => {
   let service: QuizService;
   let mockPrisma: ReturnType<typeof createMocks>['mockPrisma'];
   let mockEnrollment: ReturnType<typeof createMocks>['mockEnrollment'];
+  let mockNotification: ReturnType<typeof createMocks>['mockNotification'];
 
   beforeEach(async () => {
     const mocks = createMocks();
     mockPrisma = mocks.mockPrisma;
     mockEnrollment = mocks.mockEnrollment;
+    mockNotification = mocks.mockNotification;
 
     // Default $transaction:
     // - array form: resolve all
@@ -153,6 +166,7 @@ describe('QuizService', () => {
         QuizGradingService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrollmentService, useValue: mockEnrollment },
+        { provide: NotificationService, useValue: mockNotification },
       ],
     }).compile();
 
@@ -345,6 +359,43 @@ describe('QuizService', () => {
           }),
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    // -----------------------------------------------------------------------
+    // NEW_CONTENT notification hook
+    // -----------------------------------------------------------------------
+    it('should notify ACTIVE enrollees when creating a quiz in a PUBLISHED, non-suspended course', async () => {
+      mockPrisma.course.findUnique.mockResolvedValue(
+        buildCourse({ status: CourseStatus.PUBLISHED, isSuspended: false }),
+      );
+
+      await service.createQuiz('course-1', 'lecturer-1', buildDto());
+
+      expect(mockNotification.notifyNewContentOnBlockAdded).toHaveBeenCalledWith(
+        expect.anything(), // tx
+        { id: 'course-1', title: 'Course' },
+        { id: 'block-1', title: 'Quiz' },
+      );
+    });
+
+    it('should NOT notify when creating a quiz in a DRAFT course', async () => {
+      mockPrisma.course.findUnique.mockResolvedValue(
+        buildCourse({ status: CourseStatus.DRAFT, isSuspended: false }),
+      );
+
+      await service.createQuiz('course-1', 'lecturer-1', buildDto());
+
+      expect(mockNotification.notifyNewContentOnBlockAdded).not.toHaveBeenCalled();
+    });
+
+    it('should NOT notify when creating a quiz in a suspended course', async () => {
+      mockPrisma.course.findUnique.mockResolvedValue(
+        buildCourse({ status: CourseStatus.PUBLISHED, isSuspended: true }),
+      );
+
+      await service.createQuiz('course-1', 'lecturer-1', buildDto());
+
+      expect(mockNotification.notifyNewContentOnBlockAdded).not.toHaveBeenCalled();
     });
   });
 

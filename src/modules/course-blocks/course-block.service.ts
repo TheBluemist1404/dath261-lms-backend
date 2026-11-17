@@ -5,11 +5,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AuditAction, AuditEntityType, BlockType } from '../../generated/prisma/enums.js';
+import {
+  AuditAction,
+  AuditEntityType,
+  BlockType,
+  CourseStatus,
+} from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
+import { NotificationService } from '../notification/notification.service.js';
 import { CreateCourseBlockDto } from './dto/create-course-block.dto.js';
 import { UpdateCourseBlockDto } from './dto/update-course-block.dto.js';
 
@@ -19,6 +25,7 @@ export class CourseBlockService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly enrollmentService: EnrollmentService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   // Kiểm tra khóa học có tồn tại và thuộc lecturer hiện tại không
@@ -63,7 +70,7 @@ export class CourseBlockService {
 
   // Thêm block mới
   async create(courseId: string, lecturerId: string, dto: CreateCourseBlockDto) {
-    await this.checkCourseOwnership(courseId, lecturerId);
+    const course = await this.checkCourseOwnership(courseId, lecturerId);
 
     // If parent module id is not null, check if it existed and had same courseId
     if (dto.parentModuleId) {
@@ -118,6 +125,16 @@ export class CourseBlockService {
         },
         tx,
       );
+
+      // NEW_CONTENT: notify ACTIVE enrollees when a block is added to a
+      // PUBLISHED, non-suspended course. Draft/suspended courses are silent.
+      if (course.status === CourseStatus.PUBLISHED && !course.isSuspended) {
+        await this.notificationService.notifyNewContentOnBlockAdded(
+          tx,
+          { id: course.id, title: course.title },
+          { id: block.id, title: block.title },
+        );
+      }
 
       return block;
     });
