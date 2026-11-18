@@ -16,6 +16,7 @@ import {
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
 import { NotificationService } from '../notification/notification.service.js';
+import { ProgressService } from '../progress/progress.service.js';
 import { QuizService } from './quiz.service.js';
 import { QuizGradingService } from './quiz-grading.service.js';
 
@@ -48,6 +49,7 @@ describe('QuizService - integration', () => {
         QuizService,
         QuizGradingService,
         NotificationService,
+        ProgressService,
       ],
     }).compile();
 
@@ -64,7 +66,11 @@ describe('QuizService - integration', () => {
   });
 
   async function cleanup() {
-    // Cascade order matters: attempts/submissions -> questions -> config -> blocks -> enrollments -> courses -> users.
+    // Cascade order matters: blockProgress -> attempts/submissions -> questions -> config -> blocks -> enrollments -> courses -> users.
+    await prisma.blockProgress.deleteMany({
+      where: { enrollment: { user: { email: { startsWith: PREFIX } } } },
+    });
+
     await prisma.quizAttempt.deleteMany({
       where: { enrollment: { course: { lecturer: { email: { startsWith: PREFIX } } } } },
     });
@@ -370,6 +376,67 @@ describe('QuizService - integration', () => {
       expect(persisted.gradedAt).not.toBeNull();
     });
 
+    it('should mark the quiz block complete after a submitted attempt', async () => {
+      const quiz = await createQuiz([trueFalseQuestion()]);
+      const q = quiz.questions[0];
+
+      await service.submitAttempt(courseId, quiz.id, student.id, {
+        answers: [{ questionId: q.id, booleanAnswer: true }],
+      });
+
+      const enrollment = await prisma.enrollment.findFirstOrThrow({
+        where: { userId: student.id, courseId },
+      });
+      const progress = await prisma.blockProgress.findUniqueOrThrow({
+        where: {
+          enrollmentId_courseBlockId: {
+            enrollmentId: enrollment.id,
+            courseBlockId: quiz.id,
+          },
+        },
+      });
+      expect(progress.completed).toBe(true);
+      expect(progress.completedAt).not.toBeNull();
+    });
+
+    it('should NOT create a BlockProgress entry when the attempt limit is reached', async () => {
+      const quiz = await createQuiz([trueFalseQuestion()]);
+      const q = quiz.questions[0];
+
+      for (let i = 0; i < 3; i++) {
+        await service.submitAttempt(courseId, quiz.id, student.id, {
+          answers: [{ questionId: q.id, booleanAnswer: true }],
+        });
+      }
+
+      // Remove the progress to prove the 4th attempt does not re-create it.
+      const enrollment = await prisma.enrollment.findFirstOrThrow({
+        where: { userId: student.id, courseId },
+      });
+      await prisma.blockProgress.deleteMany({
+        where: {
+          enrollmentId: enrollment.id,
+          courseBlockId: quiz.id,
+        },
+      });
+
+      await expect(
+        service.submitAttempt(courseId, quiz.id, student.id, {
+          answers: [{ questionId: q.id, booleanAnswer: true }],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      const progress = await prisma.blockProgress.findUnique({
+        where: {
+          enrollmentId_courseBlockId: {
+            enrollmentId: enrollment.id,
+            courseBlockId: quiz.id,
+          },
+        },
+      });
+      expect(progress).toBeNull();
+    });
+
     it('grades a wrong answer with score 0', async () => {
       const quiz = await createQuiz([trueFalseQuestion()]);
       const q = quiz.questions[0];
@@ -590,6 +657,86 @@ describe('QuizService - integration', () => {
 
       const theirs = await service.getMyLatestAttempt(courseId, quiz.id, otherStudent.id);
       expect(theirs).toBeNull();
+    });
+  });
+
+  // ===========================================================================
+  // listMyAttempts — student view, array, newest first
+  // ===========================================================================
+  describe('listMyAttempts', () => {
+    it('should return an empty array when the student has no attempts', async () => {
+      const quiz = await createQuiz();
+
+      const result = await service.listMyAttempts(courseId, quiz.id, student.id);
+      expect(result).toEqual([]);
+    });
+
+    it('should return own attempts newest first, with answers=null before release', async () => {
+      const quiz = await createQuiz();
+      const q = quiz.questions[0];
+
+      await service.submitAttempt(courseId, quiz.id, student.id, {
+        answers: [{ questionId: q.id, booleanAnswer: true }],
+      });
+      await service.submitAttempt(courseId, quiz.id, student.id, {
+        answers: [{ questionId: q.id, booleanAnswer: false }],
+      });
+
+      const result = await service.listMyAttempts(courseId, quiz.id, student.id);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].attemptNumber).toBe(2);
+      expect(result[1].attemptNumber).toBe(1);
+      expect(result.every((r) => r.resultsReleased === false)).toBe(true);
+      expect(result.every((r) => r.answers === null)).toBe(true);
+    });
+
+    it('should include answers after results are released', async () => {
+      const quiz = await createQuiz();
+      const q = quiz.questions[0];
+
+      await service.submitAttempt(courseId, quiz.id, student.id, {
+        answers: [{ questionId: q.id, booleanAnswer: true }],
+      });
+      await service.releaseResults(courseId, quiz.id, lecturer.id);
+
+      const result = await service.listMyAttempts(courseId, quiz.id, student.id);
+
+      expect(result[0].resultsReleased).toBe(true);
+      expect(result[0].answers).toHaveLength(1);
+    });
+
+    it('should not return other students\u2019 attempts', async () => {
+      const quiz = await createQuiz();
+      const q = quiz.questions[0];
+
+      await service.submitAttempt(courseId, quiz.id, student.id, {
+        answers: [{ questionId: q.id, booleanAnswer: true }],
+      });
+
+      const otherResult = await service.listMyAttempts(courseId, quiz.id, otherStudent.id);
+      expect(otherResult).toEqual([]);
+    });
+
+    it('should reject a non-enrolled student', async () => {
+      const quiz = await createQuiz();
+      const outsider = await prisma.user.create({
+        data: {
+          email: `${PREFIX}outsider@example.com`,
+          passwordHash: 'hash',
+          role: UserRole.STUDENT,
+        },
+      });
+
+      await expect(service.listMyAttempts(courseId, quiz.id, outsider.id)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+
+    it('should throw NotFoundException for an unknown quiz', async () => {
+      await expect(
+        service.listMyAttempts(courseId, 'non-existent', student.id),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
