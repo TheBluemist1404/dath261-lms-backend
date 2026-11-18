@@ -4,6 +4,9 @@ import {
   AuditEntityType,
   BlockType,
   CourseStatus,
+  EnrollmentStatus,
+  QuestionType,
+  QuizAttemptStatus,
   ReportStatus,
   ReportTargetType,
 } from '../src/generated/prisma/enums.js';
@@ -535,6 +538,207 @@ describe('Admin (e2e)', () => {
           reason: 'Not a violation',
         })
         .expect(404);
+    });
+  });
+  // ---------------------------------------------------------------------------
+  // Platform statistics
+  // ---------------------------------------------------------------------------
+
+  describe('GET /api/admin/stats', () => {
+    it('should return 401 when the caller is unauthenticated', async () => {
+      await testApp.http().get('/api/admin/stats').expect(401);
+    });
+
+    it.each([
+      {
+        role: 'student',
+        auth: () => student.auth,
+      },
+      {
+        role: 'lecturer',
+        auth: () => lecturer.auth,
+      },
+    ])('should return 403 for a non-admin $role', async ({ auth }) => {
+      await testApp.http().get('/api/admin/stats').set(auth()).expect(403);
+    });
+
+    it('should return correct platform statistics for seeded data', async () => {
+      const admin = await createAdmin(testApp);
+
+      // -----------------------------------------------------------------------
+      // Users
+      // -----------------------------------------------------------------------
+
+      const suspendedStudent = await registerUser(testApp, 'STUDENT');
+
+      await testApp.prisma.user.update({
+        where: {
+          id: suspendedStudent.id,
+        },
+        data: {
+          status: AccountStatus.SUSPENDED,
+        },
+      });
+
+      // -----------------------------------------------------------------------
+      // Courses
+      // -----------------------------------------------------------------------
+
+      const quizCourse = await createCourse(testApp, {
+        lecturerId: lecturer.id,
+        title: 'Statistics published quiz course',
+        status: CourseStatus.PUBLISHED,
+        blocks: [
+          {
+            type: BlockType.QUIZ,
+            title: 'Quiz One',
+          },
+          {
+            type: BlockType.QUIZ,
+            title: 'Quiz Two',
+          },
+        ],
+      });
+
+      const draftCourse = await createCourse(testApp, {
+        lecturerId: lecturer.id,
+        title: 'Statistics draft course',
+        status: CourseStatus.DRAFT,
+      });
+
+      const suspendedCourse = await createCourse(testApp, {
+        lecturerId: lecturer.id,
+        title: 'Statistics suspended course',
+        status: CourseStatus.PUBLISHED,
+        isSuspended: true,
+      });
+
+      // -----------------------------------------------------------------------
+      // Enrollments
+      // -----------------------------------------------------------------------
+
+      const activeEnrollment = await enroll(
+        testApp,
+        student.id,
+        quizCourse.id,
+        EnrollmentStatus.ACTIVE,
+      );
+
+      await enroll(testApp, student.id, draftCourse.id, EnrollmentStatus.COMPLETED);
+
+      await enroll(testApp, student.id, suspendedCourse.id, EnrollmentStatus.LEFT);
+
+      // -----------------------------------------------------------------------
+      // Quiz questions
+      // -----------------------------------------------------------------------
+
+      const quizOneId = quizCourse.blocks[0].id;
+      const quizTwoId = quizCourse.blocks[1].id;
+
+      await testApp.prisma.quizQuestion.createMany({
+        data: [
+          {
+            courseBlockId: quizOneId,
+            type: QuestionType.SINGLE_CHOICE,
+            text: 'Question one',
+            points: 4,
+            position: 0,
+          },
+          {
+            courseBlockId: quizOneId,
+            type: QuestionType.SINGLE_CHOICE,
+            text: 'Question two',
+            points: 6,
+            position: 1,
+          },
+          {
+            courseBlockId: quizTwoId,
+            type: QuestionType.SINGLE_CHOICE,
+            text: 'Question three',
+            points: 20,
+            position: 0,
+          },
+        ],
+      });
+
+      // -----------------------------------------------------------------------
+      // Graded quiz attempts
+      // -----------------------------------------------------------------------
+
+      await testApp.prisma.quizAttempt.createMany({
+        data: [
+          {
+            enrollmentId: activeEnrollment.id,
+            courseBlockId: quizOneId,
+            attemptNumber: 1,
+            status: QuizAttemptStatus.GRADED,
+            score: 8,
+          },
+          {
+            enrollmentId: activeEnrollment.id,
+            courseBlockId: quizTwoId,
+            attemptNumber: 1,
+            status: QuizAttemptStatus.GRADED,
+            score: 15,
+          },
+        ],
+      });
+
+      // -----------------------------------------------------------------------
+      // Request statistics
+      // -----------------------------------------------------------------------
+
+      const response = await testApp.http().get('/api/admin/stats').set(admin.auth).expect(200);
+
+      expect(response.body).toMatchObject({
+        users: {
+          total: 4,
+          students: 2,
+          lecturers: 1,
+          admins: 1,
+          suspended: 1,
+        },
+        courses: {
+          total: 3,
+          published: 2,
+          draft: 1,
+          suspended: 1,
+        },
+        enrollments: {
+          total: 3,
+          active: 1,
+          completed: 1,
+          left: 1,
+        },
+        completionRate: 0.5,
+      });
+
+      expect(response.body.averageQuizScore).toBeCloseTo(0.775, 10);
+
+      expect(typeof response.body.generatedAt).toBe('string');
+      expect(Number.isNaN(Date.parse(response.body.generatedAt))).toBe(false);
+    });
+
+    it('should return zero completion rate and null average score when there are no enrollments or graded attempts', async () => {
+      const admin = await createAdmin(testApp);
+
+      await createCourse(testApp, {
+        lecturerId: lecturer.id,
+        title: 'Statistics empty course',
+        status: CourseStatus.DRAFT,
+      });
+
+      const response = await testApp.http().get('/api/admin/stats').set(admin.auth).expect(200);
+
+      expect(response.body.completionRate).toBe(0);
+      expect(response.body.averageQuizScore).toBeNull();
+
+      expect(response.body.enrollments).toEqual({
+        total: 0,
+        active: 0,
+        completed: 0,
+        left: 0,
+      });
     });
   });
 });

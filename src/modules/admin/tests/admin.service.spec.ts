@@ -6,6 +6,8 @@ import {
   AuditAction,
   AuditEntityType,
   CourseStatus,
+  EnrollmentStatus,
+  QuizAttemptStatus,
   ReportStatus,
   ReportTargetType,
   UserRole,
@@ -37,11 +39,13 @@ describe('AdminService', () => {
       count: vi.fn(),
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      groupBy: vi.fn(),
     },
     course: {
       count: vi.fn(),
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      groupBy: vi.fn(),
     },
     report: {
       count: vi.fn(),
@@ -53,6 +57,15 @@ describe('AdminService', () => {
     },
     auditEntry: {
       findMany: vi.fn(),
+    },
+    enrollment: {
+      groupBy: vi.fn(),
+    },
+    quizAttempt: {
+      findMany: vi.fn(),
+    },
+    quizQuestion: {
+      groupBy: vi.fn(),
     },
     $transaction: vi.fn(),
   };
@@ -1107,6 +1120,302 @@ describe('AdminService', () => {
 
         expect(result.items[0].target.available).toBe(false);
       });
+    });
+  });
+  // ---------------------------------------------------------------------------
+  // Platform statistics
+  // ---------------------------------------------------------------------------
+
+  describe('getStats', () => {
+    const mockEmptyStats = () => {
+      mockPrisma.user.groupBy.mockResolvedValue([]);
+      mockPrisma.user.count.mockResolvedValue(0);
+
+      mockPrisma.course.groupBy.mockResolvedValue([]);
+      mockPrisma.course.count.mockResolvedValue(0);
+
+      mockPrisma.enrollment.groupBy.mockResolvedValue([]);
+
+      mockPrisma.quizAttempt.findMany.mockResolvedValue([]);
+      mockPrisma.quizQuestion.groupBy.mockResolvedValue([]);
+    };
+
+    const decimal = (value: number) => ({
+      toNumber: () => value,
+    });
+
+    it('should return zero counts, zero completion rate, and null average score for an empty database', async () => {
+      mockEmptyStats();
+
+      const result = await service.getStats();
+
+      expect(result.users).toEqual({
+        total: 0,
+        students: 0,
+        lecturers: 0,
+        admins: 0,
+        suspended: 0,
+      });
+
+      expect(result.courses).toEqual({
+        total: 0,
+        published: 0,
+        draft: 0,
+        suspended: 0,
+      });
+
+      expect(result.enrollments).toEqual({
+        total: 0,
+        active: 0,
+        completed: 0,
+        left: 0,
+      });
+
+      expect(result.completionRate).toBe(0);
+      expect(result.averageQuizScore).toBeNull();
+
+      expect(mockPrisma.quizQuestion.groupBy).not.toHaveBeenCalled();
+
+      expect(Number.isNaN(Date.parse(result.generatedAt))).toBe(false);
+    });
+
+    it('should calculate total and per-role user counts', async () => {
+      mockEmptyStats();
+
+      mockPrisma.user.groupBy.mockResolvedValue([
+        {
+          role: UserRole.STUDENT,
+          _count: { _all: 10 },
+        },
+        {
+          role: UserRole.LECTURER,
+          _count: { _all: 3 },
+        },
+        {
+          role: UserRole.ADMIN,
+          _count: { _all: 2 },
+        },
+      ]);
+
+      const result = await service.getStats();
+
+      expect(result.users).toEqual({
+        total: 15,
+        students: 10,
+        lecturers: 3,
+        admins: 2,
+        suspended: 0,
+      });
+
+      expect(mockPrisma.user.groupBy).toHaveBeenCalledWith({
+        by: ['role'],
+        _count: {
+          _all: true,
+        },
+      });
+    });
+
+    it('should count suspended users independently of their roles', async () => {
+      mockEmptyStats();
+
+      mockPrisma.user.groupBy.mockResolvedValue([
+        {
+          role: UserRole.STUDENT,
+          _count: { _all: 10 },
+        },
+        {
+          role: UserRole.LECTURER,
+          _count: { _all: 3 },
+        },
+        {
+          role: UserRole.ADMIN,
+          _count: { _all: 2 },
+        },
+      ]);
+
+      mockPrisma.user.count.mockResolvedValue(4);
+
+      const result = await service.getStats();
+
+      expect(result.users).toEqual({
+        total: 15,
+        students: 10,
+        lecturers: 3,
+        admins: 2,
+        suspended: 4,
+      });
+
+      expect(mockPrisma.user.count).toHaveBeenCalledWith({
+        where: {
+          status: AccountStatus.SUSPENDED,
+        },
+      });
+    });
+
+    it('should calculate course counts by status and suspended count', async () => {
+      mockEmptyStats();
+
+      mockPrisma.course.groupBy.mockResolvedValue([
+        {
+          status: CourseStatus.PUBLISHED,
+          _count: { _all: 8 },
+        },
+        {
+          status: CourseStatus.DRAFT,
+          _count: { _all: 3 },
+        },
+      ]);
+
+      mockPrisma.course.count.mockResolvedValue(2);
+
+      const result = await service.getStats();
+
+      expect(result.courses).toEqual({
+        total: 11,
+        published: 8,
+        draft: 3,
+        suspended: 2,
+      });
+
+      expect(mockPrisma.course.count).toHaveBeenCalledWith({
+        where: {
+          isSuspended: true,
+        },
+      });
+    });
+
+    it('should calculate enrollment counts and completion rate excluding LEFT enrollments', async () => {
+      mockEmptyStats();
+
+      mockPrisma.enrollment.groupBy.mockResolvedValue([
+        {
+          status: EnrollmentStatus.ACTIVE,
+          _count: { _all: 6 },
+        },
+        {
+          status: EnrollmentStatus.COMPLETED,
+          _count: { _all: 3 },
+        },
+        {
+          status: EnrollmentStatus.LEFT,
+          _count: { _all: 5 },
+        },
+      ]);
+
+      const result = await service.getStats();
+
+      expect(result.enrollments).toEqual({
+        total: 14,
+        active: 6,
+        completed: 3,
+        left: 5,
+      });
+
+      expect(result.completionRate).toBeCloseTo(3 / 9, 10);
+
+      expect(mockPrisma.enrollment.groupBy).toHaveBeenCalledWith({
+        by: ['status'],
+        _count: {
+          _all: true,
+        },
+      });
+    });
+
+    it('should calculate average normalized quiz score using each quiz block maximum', async () => {
+      mockEmptyStats();
+
+      mockPrisma.quizAttempt.findMany.mockResolvedValue([
+        {
+          courseBlockId: 'quiz-1',
+          score: decimal(8),
+        },
+        {
+          courseBlockId: 'quiz-2',
+          score: decimal(15),
+        },
+      ]);
+
+      mockPrisma.quizQuestion.groupBy.mockResolvedValue([
+        {
+          courseBlockId: 'quiz-1',
+          _sum: {
+            points: decimal(10),
+          },
+        },
+        {
+          courseBlockId: 'quiz-2',
+          _sum: {
+            points: decimal(20),
+          },
+        },
+      ]);
+
+      const result = await service.getStats();
+
+      // (8 / 10 + 15 / 20) / 2 = 0.775
+      expect(result.averageQuizScore).toBeCloseTo(0.775, 10);
+
+      expect(mockPrisma.quizAttempt.findMany).toHaveBeenCalledWith({
+        where: {
+          status: QuizAttemptStatus.GRADED,
+          score: {
+            not: null,
+          },
+        },
+        select: {
+          courseBlockId: true,
+          score: true,
+        },
+      });
+
+      // Distinct quiz block IDs are used for the question aggregation.
+      expect(mockPrisma.quizQuestion.groupBy).toHaveBeenCalledWith({
+        by: ['courseBlockId'],
+        _sum: {
+          points: true,
+        },
+        where: {
+          courseBlockId: {
+            in: ['quiz-1', 'quiz-2'],
+          },
+        },
+      });
+    });
+
+    it('should return null average quiz score when all graded attempts have null scores', async () => {
+      mockEmptyStats();
+
+      // The query filters out null scores, so no attempts are returned.
+      mockPrisma.quizAttempt.findMany.mockResolvedValue([]);
+
+      const result = await service.getStats();
+
+      expect(result.averageQuizScore).toBeNull();
+      expect(mockPrisma.quizQuestion.groupBy).not.toHaveBeenCalled();
+    });
+
+    it('should return null when attempts exist but their quiz blocks have no positive question-point total', async () => {
+      mockEmptyStats();
+
+      mockPrisma.quizAttempt.findMany.mockResolvedValue([
+        {
+          courseBlockId: 'quiz-without-questions',
+          score: decimal(8),
+        },
+      ]);
+
+      mockPrisma.quizQuestion.groupBy.mockResolvedValue([
+        {
+          courseBlockId: 'quiz-without-questions',
+          _sum: {
+            points: decimal(0),
+          },
+        },
+      ]);
+
+      const result = await service.getStats();
+
+      expect(result.averageQuizScore).toBeNull();
     });
   });
 });

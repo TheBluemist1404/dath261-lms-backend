@@ -26,6 +26,7 @@ import { ListAdminUsersQueryDto } from './dto/list-admin-users-query.dto.js';
 import { PaginatedAdminCoursesResponseDto } from './dto/paginated-admin-courses-response.dto.js';
 import { PaginatedAdminReportsResponseDto } from './dto/paginated-admin-reports-response.dto.js';
 import { PaginatedAdminUsersResponseDto } from './dto/paginated-admin-users-response.dto.js';
+import { PlatformStatsDto } from './dto/platform-stats.dto.js';
 import { UpdateCourseSuspensionDto } from './dto/update-course-suspension.dto.js';
 import { UpdateReportStatusDto } from './dto/update-report-status.dto.js';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto.js';
@@ -155,5 +156,23 @@ export class AdminController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.adminService.reviewReport(reportId, req.user.userId, dto);
+  }
+
+  @Get('stats')
+  @ApiOperation({
+    summary: 'Get platform-level aggregate statistics',
+  })
+  @ApiOkResponse({
+    description: 'Platform statistics retrieved successfully.',
+    type: PlatformStatsDto,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid access token.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Admin role required.',
+  })
+  getStats() {
+    return this.adminService.getStats();
   }
 }

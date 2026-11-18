@@ -11,8 +11,10 @@ import {
   AuditEntityType,
   CourseStatus,
   EnrollmentStatus,
+  QuizAttemptStatus,
   ReportStatus,
   ReportTargetType,
+  UserRole,
 } from '../../generated/prisma/enums.js';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -28,6 +30,7 @@ import { AdminUserItemDto } from './dto/admin-user-item.dto.js';
 import { ListAdminCoursesQueryDto } from './dto/list-admin-courses-query.dto.js';
 import { ListAdminReportsQueryDto } from './dto/list-admin-reports-query.dto.js';
 import { ListAdminUsersQueryDto } from './dto/list-admin-users-query.dto.js';
+import { PlatformStatsDto } from './dto/platform-stats.dto.js';
 import { UpdateCourseSuspensionDto } from './dto/update-course-suspension.dto.js';
 import { UpdateReportStatusDto } from './dto/update-report-status.dto.js';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto.js';
@@ -440,6 +443,180 @@ export class AdminService {
     });
 
     return this.toAdminReportItem(updated);
+  }
+
+  async getStats(): Promise<PlatformStatsDto> {
+    const [
+      userCounts,
+      suspendedUserCount,
+      courseCounts,
+      suspendedCourseCount,
+      enrollmentCounts,
+      gradedAttempts,
+    ] = await Promise.all([
+      this.prisma.user.groupBy({
+        by: ['role'],
+        _count: {
+          _all: true,
+        },
+      }),
+
+      this.prisma.user.count({
+        where: {
+          status: AccountStatus.SUSPENDED,
+        },
+      }),
+
+      this.prisma.course.groupBy({
+        by: ['status'],
+        _count: {
+          _all: true,
+        },
+      }),
+
+      this.prisma.course.count({
+        where: {
+          isSuspended: true,
+        },
+      }),
+
+      this.prisma.enrollment.groupBy({
+        by: ['status'],
+        _count: {
+          _all: true,
+        },
+      }),
+
+      this.prisma.quizAttempt.findMany({
+        where: {
+          status: QuizAttemptStatus.GRADED,
+          score: {
+            not: null,
+          },
+        },
+        select: {
+          courseBlockId: true,
+          score: true,
+        },
+      }),
+    ]);
+
+    // ---------------------------------------------------------------------------
+    // User counts
+    // ---------------------------------------------------------------------------
+
+    const userCountByRole = new Map(
+      userCounts.map((item) => [item.role, item._count._all] as const),
+    );
+
+    const students = userCountByRole.get(UserRole.STUDENT) ?? 0;
+    const lecturers = userCountByRole.get(UserRole.LECTURER) ?? 0;
+    const admins = userCountByRole.get(UserRole.ADMIN) ?? 0;
+
+    const users = {
+      total: students + lecturers + admins,
+      students,
+      lecturers,
+      admins,
+      suspended: suspendedUserCount,
+    };
+
+    // ---------------------------------------------------------------------------
+    // Course counts
+    // ---------------------------------------------------------------------------
+
+    const courseCountByStatus = new Map(
+      courseCounts.map((item) => [item.status, item._count._all] as const),
+    );
+
+    const publishedCourses = courseCountByStatus.get(CourseStatus.PUBLISHED) ?? 0;
+    const draftCourses = courseCountByStatus.get(CourseStatus.DRAFT) ?? 0;
+
+    const courses = {
+      total: publishedCourses + draftCourses,
+      published: publishedCourses,
+      draft: draftCourses,
+      suspended: suspendedCourseCount,
+    };
+
+    // ---------------------------------------------------------------------------
+    // Enrollment counts and completion rate
+    // ---------------------------------------------------------------------------
+
+    const enrollmentCountByStatus = new Map(
+      enrollmentCounts.map((item) => [item.status, item._count._all] as const),
+    );
+
+    const activeEnrollments = enrollmentCountByStatus.get(EnrollmentStatus.ACTIVE) ?? 0;
+    const completedEnrollments = enrollmentCountByStatus.get(EnrollmentStatus.COMPLETED) ?? 0;
+    const leftEnrollments = enrollmentCountByStatus.get(EnrollmentStatus.LEFT) ?? 0;
+
+    const enrollments = {
+      total: activeEnrollments + completedEnrollments + leftEnrollments,
+      active: activeEnrollments,
+      completed: completedEnrollments,
+      left: leftEnrollments,
+    };
+
+    const completionDenominator = activeEnrollments + completedEnrollments;
+
+    const completionRate =
+      completionDenominator === 0 ? 0 : completedEnrollments / completionDenominator;
+
+    let averageQuizScore: number | null = null;
+
+    if (gradedAttempts.length > 0) {
+      // Fetch question-point totals only for blocks that have scored attempts.
+      const distinctBlockIds = [...new Set(gradedAttempts.map((attempt) => attempt.courseBlockId))];
+
+      if (distinctBlockIds.length > 0) {
+        const questionPointSums = await this.prisma.quizQuestion.groupBy({
+          by: ['courseBlockId'],
+          _sum: {
+            points: true,
+          },
+          where: {
+            courseBlockId: {
+              in: distinctBlockIds,
+            },
+          },
+        });
+
+        const maxScoreByBlock = new Map<string, number>();
+
+        for (const row of questionPointSums) {
+          maxScoreByBlock.set(row.courseBlockId, row._sum.points?.toNumber() ?? 0);
+        }
+
+        const scoreRatios: number[] = [];
+
+        for (const attempt of gradedAttempts) {
+          const score = attempt.score?.toNumber();
+          const maxScore = maxScoreByBlock.get(attempt.courseBlockId);
+
+          // A ratio cannot be calculated if the quiz has no positive max score.
+          if (score === undefined || maxScore === undefined || maxScore <= 0) {
+            continue;
+          }
+
+          scoreRatios.push(score / maxScore);
+        }
+
+        if (scoreRatios.length > 0) {
+          averageQuizScore =
+            scoreRatios.reduce((sum, ratio) => sum + ratio, 0) / scoreRatios.length;
+        }
+      }
+    }
+
+    return {
+      users,
+      courses,
+      enrollments,
+      completionRate,
+      averageQuizScore,
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   // ---------------------------------------------------------------------------
