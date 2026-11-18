@@ -268,6 +268,34 @@ export class QuizController {
     return this.quizService.getMyLatestAttempt(courseId, blockId, req.user.userId);
   }
 
+  @Get(':blockId/my-attempts')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({
+    summary: 'List my attempts for this quiz',
+    description:
+      'Returns all attempts submitted by the current Student for this quiz, newest first. ' +
+      'Returns an empty array if the Student has not submitted any attempt yet. ' +
+      'Per-question results (correct answers) are only included when the Lecturer has released results, ' +
+      'same rule as my-latest-attempt.',
+  })
+  @ApiParam({ name: 'courseId', description: 'ID of the course' })
+  @ApiParam({ name: 'blockId', description: 'ID of the QUIZ block' })
+  @ApiOkResponse({
+    description: 'List of the Student\u2019s attempts, newest first.',
+    type: [QuizAttemptResponseDto],
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token.' })
+  @ApiForbiddenResponse({ description: 'You are not enrolled in this course.' })
+  @ApiNotFoundResponse({ description: 'Course or quiz not found.' })
+  listMyAttempts(
+    @Param('courseId') courseId: string,
+    @Param('blockId') blockId: string,
+    @Req() req: { user: AuthenticatedUser },
+  ): Promise<QuizAttemptResponseDto[]> {
+    return this.quizService.listMyAttempts(courseId, blockId, req.user.userId);
+  }
+
   @Post(':blockId/attempts')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(RolesGuard)

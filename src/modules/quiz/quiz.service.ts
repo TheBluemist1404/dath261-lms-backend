@@ -17,6 +17,7 @@ import {
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
 import { NotificationService } from '../notification/notification.service.js';
+import { ProgressService } from '../progress/progress.service.js';
 import { CreateQuizDto } from './dto/create-quiz.dto.js';
 import { PaginatedQuizAttemptResponseDto } from './dto/paginated-quiz-attempt-response.dto.js';
 import { QuizAttemptDetailResponseDto } from './dto/quiz-attempt-detail-response.dto.js';
@@ -67,6 +68,7 @@ export class QuizService {
     private readonly enrollmentService: EnrollmentService,
     private readonly gradingService: QuizGradingService,
     private readonly notificationService: NotificationService,
+    private readonly progressService: ProgressService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -380,7 +382,7 @@ export class QuizService {
 
       const grading = this.gradeSubmit(block, dto.answers);
 
-      return tx.quizAttempt.create({
+      const created = await tx.quizAttempt.create({
         data: {
           enrollmentId: enrollment.id,
           courseBlockId: blockId,
@@ -394,6 +396,17 @@ export class QuizService {
           isLate,
         },
       });
+
+      // Mark the quiz block complete
+      await this.progressService.markAssessmentBlockCompleted(
+        tx,
+        userId,
+        courseId,
+        blockId,
+        BlockType.QUIZ,
+      );
+
+      return created;
     });
 
     return this.toStudentAttemptResponse(
@@ -407,47 +420,23 @@ export class QuizService {
     courseId: string,
     blockId: string,
     userId: string,
-    query: QuizAttemptListQueryDto,
-  ): Promise<PaginatedQuizAttemptResponseDto> {
+  ): Promise<QuizAttemptResponseDto[]> {
     const enrollment = await this.enrollmentService.assertCanAccessCourse(userId, courseId);
     const block = await this.loadQuizBlock(courseId, blockId);
 
-    const page = query.page ?? DEFAULT_PAGE;
-    const limit = query.limit ?? DEFAULT_LIMIT;
-    const skip = (page - 1) * limit;
-
-    const [total, attempts] = await Promise.all([
-      this.prisma.quizAttempt.count({
-        where: { enrollmentId: enrollment.id, courseBlockId: blockId },
-      }),
-      this.prisma.quizAttempt.findMany({
-        where: { enrollmentId: enrollment.id, courseBlockId: blockId },
-        orderBy: { attemptNumber: 'desc' },
-        skip,
-        take: limit,
-        include: {
-          enrollment: {
-            select: {
-              user: { select: { id: true, email: true, firstName: true, lastName: true } },
-            },
-          },
-        },
-      }),
-    ]);
-
-    const totalPages = Math.ceil(total / limit) || 0;
-
-    return {
-      data: attempts.map((attempt) => this.toLecturerAttemptDetailResponse(attempt, block)),
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages,
-        hasNextPage: page < totalPages,
-        hasPrevPage: page > 1,
+    const attempts = await this.prisma.quizAttempt.findMany({
+      where: {
+        enrollmentId: enrollment.id,
+        courseBlockId: blockId,
       },
-    };
+      orderBy: [{ attemptNumber: 'desc' }, { submittedAt: 'desc' }],
+    });
+
+    const resultsReleasedAt = block.quizConfig?.resultsReleasedAt ?? null;
+
+    return attempts.map((attempt) =>
+      this.toStudentAttemptResponse(attempt, resultsReleasedAt, block),
+    );
   }
 
   async getMyLatestAttempt(
