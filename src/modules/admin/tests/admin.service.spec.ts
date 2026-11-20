@@ -1417,7 +1417,7 @@ describe('AdminService', () => {
 
       const result = await service.getStats();
 
-      expect(result.averageQuizScore).toBeNull();
+      await expect(service.getStats()).rejects.toThrow(InternalServerErrorException);
     });
     it('should throw InternalServerErrorException when graded quiz attempts contain corrupted scoring data', async () => {
       mockEmptyStats();
