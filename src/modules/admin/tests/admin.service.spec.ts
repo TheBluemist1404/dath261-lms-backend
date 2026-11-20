@@ -1396,7 +1396,7 @@ describe('AdminService', () => {
       expect(mockPrisma.quizQuestion.groupBy).not.toHaveBeenCalled();
     });
 
-    it('should return null when attempts exist but their quiz blocks have no positive question-point total', async () => {
+    it('should throw InternalServerErrorException when attempts exist but their quiz blocks have no positive question-point total', async () => {
       mockEmptyStats();
 
       mockPrisma.quizAttempt.findMany.mockResolvedValue([
@@ -1414,8 +1414,6 @@ describe('AdminService', () => {
           },
         },
       ]);
-
-      const result = await service.getStats();
 
       await expect(service.getStats()).rejects.toThrow(InternalServerErrorException);
     });
