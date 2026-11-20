@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -1397,7 +1402,7 @@ describe('AdminService', () => {
       mockPrisma.quizAttempt.findMany.mockResolvedValue([
         {
           courseBlockId: 'quiz-without-questions',
-          score: decimal(8),
+          score: decimal(0),
         },
       ]);
 
@@ -1413,6 +1418,27 @@ describe('AdminService', () => {
       const result = await service.getStats();
 
       expect(result.averageQuizScore).toBeNull();
+    });
+    it('should throw InternalServerErrorException when graded quiz attempts contain corrupted scoring data', async () => {
+      mockEmptyStats();
+
+      mockPrisma.quizAttempt.findMany.mockResolvedValue([
+        {
+          courseBlockId: 'quiz-corrupted',
+          score: decimal(12),
+        },
+      ]);
+
+      mockPrisma.quizQuestion.groupBy.mockResolvedValue([
+        {
+          courseBlockId: 'quiz-corrupted',
+          _sum: {
+            points: decimal(10),
+          },
+        },
+      ]);
+
+      await expect(service.getStats()).rejects.toThrow(InternalServerErrorException);
     });
   });
 });
