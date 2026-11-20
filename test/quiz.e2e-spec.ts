@@ -755,6 +755,36 @@ describe('Quiz (e2e)', () => {
     });
   });
 
+  it('should accept a submission from a COMPLETED enrollment without marking progress', async () => {
+    const quiz = await createQuizViaApi([trueFalseQuestion()]);
+    const q = quiz.questions[0];
+
+    // Flip the enrollment to COMPLETED
+    await testApp.prisma.enrollment.updateMany({
+      where: { userId: student.id, courseId },
+      data: { status: EnrollmentStatus.COMPLETED, completedAt: new Date() },
+    });
+
+    await testApp
+      .http()
+      .post(`${basePath()}/${quiz.id}/attempts`)
+      .set(student.auth)
+      .send({ answers: [{ questionId: q.id, booleanAnswer: true }] })
+      .expect(201);
+
+    // Progress should NOT show the quiz as completed
+    const progress = await testApp
+      .http()
+      .get(`/api/courses/${courseId}/progress`)
+      .set(student.auth)
+      .expect(200);
+
+    const quizItem = progress.body.items.find(
+      (item: { courseBlockId: string }) => item.courseBlockId === quiz.id,
+    );
+    expect(quizItem?.completed).toBe(false);
+  });
+
   // ===========================================================================
   // GET /quizzes/:blockId/my-latest-attempt
   // ===========================================================================

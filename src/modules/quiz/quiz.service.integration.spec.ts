@@ -437,6 +437,44 @@ describe('QuizService - integration', () => {
       expect(progress).toBeNull();
     });
 
+    it('should submit an attempt for a COMPLETED enrollment but NOT mark progress', async () => {
+      const quiz = await createQuiz([trueFalseQuestion()]);
+      const q = quiz.questions[0];
+
+      // Flip the enrollment to COMPLETED
+      await prisma.enrollment.updateMany({
+        where: { userId: student.id, courseId },
+        data: { status: EnrollmentStatus.COMPLETED, completedAt: new Date() },
+      });
+
+      const attempt = await service.submitAttempt(courseId, quiz.id, student.id, {
+        answers: [{ questionId: q.id, booleanAnswer: true }],
+      });
+
+      expect(attempt.id).toBeDefined();
+
+      // Attempt persisted
+      const persisted = await prisma.quizAttempt.findUniqueOrThrow({
+        where: { id: attempt.id },
+      });
+      expect(persisted).not.toBeNull();
+
+      // BlockProgress NOT created
+      const progress = await prisma.blockProgress.findUnique({
+        where: {
+          enrollmentId_courseBlockId: {
+            enrollmentId: (
+              await prisma.enrollment.findFirstOrThrow({
+                where: { userId: student.id, courseId },
+              })
+            ).id,
+            courseBlockId: quiz.id,
+          },
+        },
+      });
+      expect(progress).toBeNull();
+    });
+
     it('grades a wrong answer with score 0', async () => {
       const quiz = await createQuiz([trueFalseQuestion()]);
       const q = quiz.questions[0];

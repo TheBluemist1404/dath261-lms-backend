@@ -536,6 +536,24 @@ describe('QuizService', () => {
       expect(mockProgress.markAssessmentBlockCompleted).not.toHaveBeenCalled();
     });
 
+    it('should submit an attempt for a COMPLETED enrollment but NOT mark progress', async () => {
+      mockEnrollment.assertCanAccessCourse.mockResolvedValue({
+        id: 'enrollment-1',
+        status: 'COMPLETED',
+      });
+      mockPrisma.quizAttempt.count.mockResolvedValue(0);
+      mockPrisma.quizAttempt.create.mockResolvedValue(buildAttempt());
+
+      await service.submitAttempt('course-1', 'block-1', 'student-1', {
+        answers: [{ questionId: 'q1', booleanAnswer: true }],
+      });
+
+      // Attempt created
+      expect(mockPrisma.quizAttempt.create).toHaveBeenCalled();
+      // But progress NOT marked
+      expect(mockProgress.markAssessmentBlockCompleted).not.toHaveBeenCalled();
+    });
+
     it('rejects when attempt limit is reached', async () => {
       mockPrisma.quizAttempt.count.mockResolvedValue(3);
 

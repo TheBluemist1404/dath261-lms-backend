@@ -10,6 +10,7 @@ import type { Prisma } from '../../generated/prisma/client.js';
 import {
   BlockType,
   CourseStatus,
+  EnrollmentStatus,
   QuestionType,
   QuizAttemptStatus,
   QuizScoringMode,
@@ -397,14 +398,16 @@ export class QuizService {
         },
       });
 
-      // Mark the quiz block complete
-      await this.progressService.markAssessmentBlockCompleted(
-        tx,
-        userId,
-        courseId,
-        blockId,
-        BlockType.QUIZ,
-      );
+      // Mark the quiz block complete if enrollment is active
+      if (enrollment.status === EnrollmentStatus.ACTIVE) {
+        await this.progressService.markAssessmentBlockCompleted(
+          tx,
+          userId,
+          courseId,
+          blockId,
+          BlockType.QUIZ,
+        );
+      }
 
       return created;
     });
