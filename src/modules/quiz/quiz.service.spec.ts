@@ -17,6 +17,7 @@ import {
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service.js';
 import { EnrollmentService } from '../enrollments/enrollment.service.js';
 import { NotificationService } from '../notification/notification.service.js';
+import { ProgressService } from '../progress/progress.service.js';
 import { CreateQuizDto } from './dto/create-quiz.dto.js';
 import { QuizService } from './quiz.service.js';
 import { QuizGradingService } from './quiz-grading.service.js';
@@ -135,7 +136,11 @@ const createMocks = () => {
     notifyResultReleased: vi.fn().mockResolvedValue({ created: 0 }),
   };
 
-  return { mockPrisma, mockEnrollment, mockNotification };
+  const mockProgress = {
+    markAssessmentBlockCompleted: vi.fn().mockResolvedValue(undefined),
+  };
+
+  return { mockPrisma, mockEnrollment, mockNotification, mockProgress };
 };
 
 describe('QuizService', () => {
@@ -143,12 +148,14 @@ describe('QuizService', () => {
   let mockPrisma: ReturnType<typeof createMocks>['mockPrisma'];
   let mockEnrollment: ReturnType<typeof createMocks>['mockEnrollment'];
   let mockNotification: ReturnType<typeof createMocks>['mockNotification'];
+  let mockProgress: ReturnType<typeof createMocks>['mockProgress'];
 
   beforeEach(async () => {
     const mocks = createMocks();
     mockPrisma = mocks.mockPrisma;
     mockEnrollment = mocks.mockEnrollment;
     mockNotification = mocks.mockNotification;
+    mockProgress = mocks.mockProgress;
 
     // Default $transaction:
     // - array form: resolve all
@@ -167,6 +174,7 @@ describe('QuizService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: EnrollmentService, useValue: mockEnrollment },
         { provide: NotificationService, useValue: mockNotification },
+        { provide: ProgressService, useValue: mockProgress },
       ],
     }).compile();
 
@@ -372,7 +380,7 @@ describe('QuizService', () => {
       await service.createQuiz('course-1', 'lecturer-1', buildDto());
 
       expect(mockNotification.notifyNewContentOnBlockAdded).toHaveBeenCalledWith(
-        expect.anything(), // tx
+        expect.anything(),
         { id: 'course-1', title: 'Course' },
         { id: 'block-1', title: 'Quiz' },
       );
@@ -436,20 +444,8 @@ describe('QuizService', () => {
               createdAt: new Date('2026-01-01T00:00:00.000Z'),
               updatedAt: new Date('2026-01-01T00:00:00.000Z'),
               options: [
-                {
-                  id: 'o1',
-                  questionId: 'q1',
-                  text: 'A',
-                  isCorrect: true,
-                  position: 0,
-                },
-                {
-                  id: 'o2',
-                  questionId: 'q1',
-                  text: 'B',
-                  isCorrect: false,
-                  position: 1,
-                },
+                { id: 'o1', questionId: 'q1', text: 'A', isCorrect: true, position: 0 },
+                { id: 'o2', questionId: 'q1', text: 'B', isCorrect: false, position: 1 },
               ],
             },
           ],
@@ -513,8 +509,53 @@ describe('QuizService', () => {
       expect(call.data.gradedAt).toBeInstanceOf(Date);
     });
 
+    // -----------------------------------------------------------------------
+    // Progress marking
+    // -----------------------------------------------------------------------
+    it('should mark the quiz block complete via ProgressService in the same transaction', async () => {
+      await service.submitAttempt('course-1', 'block-1', 'student-1', {
+        answers: [{ questionId: 'q1', booleanAnswer: true }],
+      });
+
+      expect(mockProgress.markAssessmentBlockCompleted).toHaveBeenCalledWith(
+        expect.anything(),
+        'student-1',
+        'course-1',
+        'block-1',
+        BlockType.QUIZ,
+      );
+    });
+
+    it('should NOT mark complete when the attempt limit is reached', async () => {
+      mockPrisma.quizAttempt.count.mockResolvedValue(3);
+
+      await expect(
+        service.submitAttempt('course-1', 'block-1', 'student-1', { answers: [] }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(mockProgress.markAssessmentBlockCompleted).not.toHaveBeenCalled();
+    });
+
+    it('should submit an attempt for a COMPLETED enrollment but NOT mark progress', async () => {
+      mockEnrollment.assertCanAccessCourse.mockResolvedValue({
+        id: 'enrollment-1',
+        status: 'COMPLETED',
+      });
+      mockPrisma.quizAttempt.count.mockResolvedValue(0);
+      mockPrisma.quizAttempt.create.mockResolvedValue(buildAttempt());
+
+      await service.submitAttempt('course-1', 'block-1', 'student-1', {
+        answers: [{ questionId: 'q1', booleanAnswer: true }],
+      });
+
+      // Attempt created
+      expect(mockPrisma.quizAttempt.create).toHaveBeenCalled();
+      // But progress NOT marked
+      expect(mockProgress.markAssessmentBlockCompleted).not.toHaveBeenCalled();
+    });
+
     it('rejects when attempt limit is reached', async () => {
-      mockPrisma.quizAttempt.count.mockResolvedValue(3); // maxAttempts = 3
+      mockPrisma.quizAttempt.count.mockResolvedValue(3);
 
       await expect(
         service.submitAttempt('course-1', 'block-1', 'student-1', { answers: [] }),
@@ -568,6 +609,96 @@ describe('QuizService', () => {
 
       const call = mockPrisma.quizAttempt.create.mock.calls[0][0];
       expect(call.data.isLate).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // listMyAttempts — student view, array, newest first
+  // -------------------------------------------------------------------------
+  describe('listMyAttempts', () => {
+    beforeEach(() => {
+      mockPrisma.courseBlock.findFirst.mockResolvedValue(buildQuizBlock());
+      mockEnrollment.assertCanAccessCourse.mockResolvedValue({
+        id: 'enrollment-1',
+        status: 'ACTIVE',
+      });
+    });
+
+    it('should return an empty array when no attempts exist', async () => {
+      mockPrisma.quizAttempt.findMany.mockResolvedValue([]);
+
+      const result = await service.listMyAttempts('course-1', 'block-1', 'student-1');
+
+      expect(result).toEqual([]);
+    });
+
+    it('should return the caller own attempts, newest first', async () => {
+      mockPrisma.quizAttempt.findMany.mockResolvedValue([
+        buildAttempt({ id: 'a3', attemptNumber: 3 }),
+        buildAttempt({ id: 'a2', attemptNumber: 2 }),
+        buildAttempt({ id: 'a1', attemptNumber: 1 }),
+      ]);
+
+      const result = await service.listMyAttempts('course-1', 'block-1', 'student-1');
+
+      expect(result.map((r) => r.id)).toEqual(['a3', 'a2', 'a1']);
+      expect(mockPrisma.quizAttempt.findMany).toHaveBeenCalledWith({
+        where: { enrollmentId: 'enrollment-1', courseBlockId: 'block-1' },
+        orderBy: [{ attemptNumber: 'desc' }, { submittedAt: 'desc' }],
+      });
+    });
+
+    it('should call assertCanAccessCourse', async () => {
+      mockPrisma.quizAttempt.findMany.mockResolvedValue([]);
+
+      await service.listMyAttempts('course-1', 'block-1', 'student-1');
+
+      expect(mockEnrollment.assertCanAccessCourse).toHaveBeenCalledWith('student-1', 'course-1');
+    });
+
+    it('should hide per-question answers when results are not released', async () => {
+      mockPrisma.quizAttempt.findMany.mockResolvedValue([buildAttempt()]);
+
+      const result = await service.listMyAttempts('course-1', 'block-1', 'student-1');
+
+      expect(result[0].resultsReleased).toBe(false);
+      expect(result[0].answers).toBeNull();
+    });
+
+    it('should include per-question answers when results are released', async () => {
+      mockPrisma.courseBlock.findFirst.mockResolvedValue(
+        buildQuizBlock({
+          quizConfig: {
+            ...buildQuizBlock().quizConfig,
+            resultsReleasedAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+        }),
+      );
+      mockPrisma.quizAttempt.findMany.mockResolvedValue([buildAttempt()]);
+
+      const result = await service.listMyAttempts('course-1', 'block-1', 'student-1');
+
+      expect(result[0].resultsReleased).toBe(true);
+      expect(result[0].answers).toHaveLength(1);
+      expect(result[0].answers?.[0].isCorrect).toBe(true);
+    });
+
+    it('should reject when the student is not enrolled', async () => {
+      mockEnrollment.assertCanAccessCourse.mockRejectedValue(
+        new ForbiddenException('You do not have access to this course.'),
+      );
+
+      await expect(
+        service.listMyAttempts('course-1', 'block-1', 'student-1'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('should reject when the quiz does not exist', async () => {
+      mockPrisma.courseBlock.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.listMyAttempts('course-1', 'block-1', 'student-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 
