@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client.js';
@@ -490,9 +491,6 @@ export class AdminService {
       this.prisma.quizAttempt.findMany({
         where: {
           status: QuizAttemptStatus.GRADED,
-          score: {
-            not: null,
-          },
         },
         select: {
           courseBlockId: true,
@@ -566,47 +564,47 @@ export class AdminService {
     let averageQuizScore: number | null = null;
 
     if (gradedAttempts.length > 0) {
-      // Fetch question-point totals only for blocks that have scored attempts.
-      const distinctBlockIds = [...new Set(gradedAttempts.map((attempt) => attempt.courseBlockId))];
+      const courseBlockIds = [...new Set(gradedAttempts.map((attempt) => attempt.courseBlockId))];
 
-      if (distinctBlockIds.length > 0) {
-        const questionPointSums = await this.prisma.quizQuestion.groupBy({
-          by: ['courseBlockId'],
-          _sum: {
-            points: true,
+      const questionPointGroups = await this.prisma.quizQuestion.groupBy({
+        by: ['courseBlockId'],
+        _sum: {
+          points: true,
+        },
+        where: {
+          courseBlockId: {
+            in: courseBlockIds,
           },
-          where: {
-            courseBlockId: {
-              in: distinctBlockIds,
-            },
-          },
-        });
+        },
+      });
 
-        const maxScoreByBlock = new Map<string, number>();
+      const maxScoreByBlock = new Map(
+        questionPointGroups.map((group) => [
+          group.courseBlockId,
+          group._sum.points?.toNumber() ?? 0,
+        ]),
+      );
 
-        for (const row of questionPointSums) {
-          maxScoreByBlock.set(row.courseBlockId, row._sum.points?.toNumber() ?? 0);
+      const scoreRatios = gradedAttempts.map((attempt) => {
+        const score = attempt.score?.toNumber();
+        const maxScore = maxScoreByBlock.get(attempt.courseBlockId);
+
+        if (
+          score === undefined ||
+          maxScore === undefined ||
+          maxScore <= 0 ||
+          score < 0 ||
+          score > maxScore
+        ) {
+          throw new InternalServerErrorException(
+            'Graded quiz attempts contain invalid scoring data.',
+          );
         }
 
-        const scoreRatios: number[] = [];
+        return score / maxScore;
+      });
 
-        for (const attempt of gradedAttempts) {
-          const score = attempt.score?.toNumber();
-          const maxScore = maxScoreByBlock.get(attempt.courseBlockId);
-
-          // A ratio cannot be calculated if the quiz has no positive max score.
-          if (score === undefined || maxScore === undefined || maxScore <= 0) {
-            continue;
-          }
-
-          scoreRatios.push(score / maxScore);
-        }
-
-        if (scoreRatios.length > 0) {
-          averageQuizScore =
-            scoreRatios.reduce((sum, ratio) => sum + ratio, 0) / scoreRatios.length;
-        }
-      }
+      averageQuizScore = scoreRatios.reduce((sum, ratio) => sum + ratio, 0) / scoreRatios.length;
     }
 
     return {

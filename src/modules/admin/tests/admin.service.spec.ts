@@ -1358,9 +1358,6 @@ describe('AdminService', () => {
       expect(mockPrisma.quizAttempt.findMany).toHaveBeenCalledWith({
         where: {
           status: QuizAttemptStatus.GRADED,
-          score: {
-            not: null,
-          },
         },
         select: {
           courseBlockId: true,
