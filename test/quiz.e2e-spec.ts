@@ -723,6 +723,66 @@ describe('Quiz (e2e)', () => {
         .send({ answers: [], hacker: 'x' })
         .expect(400);
     });
+
+    it('should mark the quiz block complete in course progress after a submitted attempt', async () => {
+      const quiz = await createQuizViaApi([trueFalseQuestion()]);
+      const q = quiz.questions[0];
+
+      await testApp
+        .http()
+        .post(`${basePath()}/${quiz.id}/attempts`)
+        .set(student.auth)
+        .send({ answers: [{ questionId: q.id, booleanAnswer: true }] })
+        .expect(201);
+
+      const progress = await testApp
+        .http()
+        .get(`/api/courses/${courseId}/progress`)
+        .set(student.auth)
+        .expect(200);
+
+      // The quiz item must be marked completed.
+      const quizItem = progress.body.items.find(
+        (item: { courseBlockId: string }) => item.courseBlockId === quiz.id,
+      );
+      expect(quizItem).toBeDefined();
+      expect(quizItem.completed).toBe(true);
+      expect(quizItem.completedAt).not.toBeNull();
+
+      // completedQuizzes goes up in the aggregated metrics.
+      expect(progress.body.progress.completedQuizzes).toBeGreaterThanOrEqual(1);
+      expect(progress.body.progress.totalQuizzes).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it('should accept a submission from a COMPLETED enrollment without marking progress', async () => {
+    const quiz = await createQuizViaApi([trueFalseQuestion()]);
+    const q = quiz.questions[0];
+
+    // Flip the enrollment to COMPLETED
+    await testApp.prisma.enrollment.updateMany({
+      where: { userId: student.id, courseId },
+      data: { status: EnrollmentStatus.COMPLETED, completedAt: new Date() },
+    });
+
+    await testApp
+      .http()
+      .post(`${basePath()}/${quiz.id}/attempts`)
+      .set(student.auth)
+      .send({ answers: [{ questionId: q.id, booleanAnswer: true }] })
+      .expect(201);
+
+    // Progress should NOT show the quiz as completed
+    const progress = await testApp
+      .http()
+      .get(`/api/courses/${courseId}/progress`)
+      .set(student.auth)
+      .expect(200);
+
+    const quizItem = progress.body.items.find(
+      (item: { courseBlockId: string }) => item.courseBlockId === quiz.id,
+    );
+    expect(quizItem?.completed).toBe(false);
   });
 
   // ===========================================================================
@@ -823,6 +883,124 @@ describe('Quiz (e2e)', () => {
         .get(`${basePath()}/${quiz.id}/my-latest-attempt`)
         .set(outsider.auth)
         .expect(403);
+    });
+  });
+
+  // ===========================================================================
+  // GET /quizzes/:blockId/my-attempts
+  // ===========================================================================
+  describe('GET /quizzes/:blockId/my-attempts', () => {
+    it('should return an empty array when the student has no attempts', async () => {
+      const quiz = await createQuizViaApi();
+
+      const res = await testApp
+        .http()
+        .get(`${basePath()}/${quiz.id}/my-attempts`)
+        .set(student.auth)
+        .expect(200);
+
+      expect(res.body).toEqual([]);
+    });
+
+    it('should return own attempts newest first, with answers=null before release', async () => {
+      const quiz = await createQuizViaApi([trueFalseQuestion()]);
+      const q = quiz.questions[0];
+
+      // Attempt 1
+      await testApp
+        .http()
+        .post(`${basePath()}/${quiz.id}/attempts`)
+        .set(student.auth)
+        .send({ answers: [{ questionId: q.id, booleanAnswer: true }] })
+        .expect(201);
+
+      // Attempt 2
+      await testApp
+        .http()
+        .post(`${basePath()}/${quiz.id}/attempts`)
+        .set(student.auth)
+        .send({ answers: [{ questionId: q.id, booleanAnswer: false }] })
+        .expect(201);
+
+      const res = await testApp
+        .http()
+        .get(`${basePath()}/${quiz.id}/my-attempts`)
+        .set(student.auth)
+        .expect(200);
+
+      expect(res.body).toHaveLength(2);
+      expect(res.body[0].attemptNumber).toBe(2);
+      expect(res.body[1].attemptNumber).toBe(1);
+      // Results not released yet → answers null, resultsReleased false
+      expect(res.body.every((r: { resultsReleased: boolean }) => r.resultsReleased === false)).toBe(
+        true,
+      );
+      expect(res.body.every((r: { answers: unknown }) => r.answers === null)).toBe(true);
+    });
+
+    it('should include per-question answers after results are released', async () => {
+      const quiz = await createQuizViaApi([trueFalseQuestion()]);
+      const q = quiz.questions[0];
+
+      await testApp
+        .http()
+        .post(`${basePath()}/${quiz.id}/attempts`)
+        .set(student.auth)
+        .send({ answers: [{ questionId: q.id, booleanAnswer: true }] })
+        .expect(201);
+
+      await testApp
+        .http()
+        .patch(`${basePath()}/${quiz.id}/release-results`)
+        .set(lecturer.auth)
+        .expect(200);
+
+      const res = await testApp
+        .http()
+        .get(`${basePath()}/${quiz.id}/my-attempts`)
+        .set(student.auth)
+        .expect(200);
+
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0].resultsReleased).toBe(true);
+      expect(res.body[0].answers).toHaveLength(1);
+      expect(res.body[0].answers[0].isCorrect).toBe(true);
+      expect(res.body[0].answers[0].correctAnswer).toBe(true);
+    });
+
+    it('should not include another student\u2019s attempts (outsider gets 403)', async () => {
+      const quiz = await createQuizViaApi();
+      const q = quiz.questions[0];
+
+      await testApp
+        .http()
+        .post(`${basePath()}/${quiz.id}/attempts`)
+        .set(student.auth)
+        .send({ answers: [{ questionId: q.id, booleanAnswer: true }] })
+        .expect(201);
+
+      // Outsider is not enrolled → 403 (same rule as my-latest-attempt)
+      await testApp
+        .http()
+        .get(`${basePath()}/${quiz.id}/my-attempts`)
+        .set(outsider.auth)
+        .expect(403);
+    });
+
+    it('should return 404 for a non-existent quiz', async () => {
+      await testApp
+        .http()
+        .get(`${basePath()}/non-existent/my-attempts`)
+        .set(student.auth)
+        .expect(404);
+    });
+
+    it('should return 404 for a non-existent course', async () => {
+      await testApp
+        .http()
+        .get('/api/courses/non-existent/quizzes/whatever/my-attempts')
+        .set(student.auth)
+        .expect(404);
     });
   });
 
