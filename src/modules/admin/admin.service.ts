@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client.js';
@@ -585,26 +584,28 @@ export class AdminService {
         ]),
       );
 
-      const scoreRatios = gradedAttempts.map((attempt) => {
+      const scoreRatios = gradedAttempts.flatMap((attempt): number[] => {
         const score = attempt.score?.toNumber();
         const maxScore = maxScoreByBlock.get(attempt.courseBlockId);
-
         if (
           score === undefined ||
+          !Number.isFinite(score) ||
           maxScore === undefined ||
+          !Number.isFinite(maxScore) ||
           maxScore <= 0 ||
           score < 0 ||
           score > maxScore
         ) {
-          throw new InternalServerErrorException(
-            'Graded quiz attempts contain invalid scoring data.',
-          );
+          return [];
         }
 
-        return score / maxScore;
+        return [score / maxScore];
       });
 
-      averageQuizScore = scoreRatios.reduce((sum, ratio) => sum + ratio, 0) / scoreRatios.length;
+      averageQuizScore =
+        scoreRatios.length === 0
+          ? null
+          : scoreRatios.reduce((sum, ratio) => sum + ratio, 0) / scoreRatios.length;
     }
 
     return {

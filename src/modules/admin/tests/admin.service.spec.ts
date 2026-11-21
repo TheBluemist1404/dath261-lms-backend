@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -1396,7 +1391,7 @@ describe('AdminService', () => {
       expect(mockPrisma.quizQuestion.groupBy).not.toHaveBeenCalled();
     });
 
-    it('should throw InternalServerErrorException when attempts exist but their quiz blocks have no positive question-point total', async () => {
+    it('should return null when all graded attempts have invalid scoring data', async () => {
       mockEmptyStats();
 
       mockPrisma.quizAttempt.findMany.mockResolvedValue([
@@ -1415,28 +1410,43 @@ describe('AdminService', () => {
         },
       ]);
 
-      await expect(service.getStats()).rejects.toThrow(InternalServerErrorException);
+      const result = await service.getStats();
+
+      expect(result.averageQuizScore).toBeNull();
     });
-    it('should throw InternalServerErrorException when graded quiz attempts contain corrupted scoring data', async () => {
+
+    it('should skip attempts whose scores exceed the current quiz maximum', async () => {
       mockEmptyStats();
 
       mockPrisma.quizAttempt.findMany.mockResolvedValue([
         {
-          courseBlockId: 'quiz-corrupted',
-          score: decimal(12),
+          courseBlockId: 'quiz-valid',
+          score: decimal(8),
+        },
+        {
+          courseBlockId: 'quiz-edited',
+          score: decimal(5),
         },
       ]);
 
       mockPrisma.quizQuestion.groupBy.mockResolvedValue([
         {
-          courseBlockId: 'quiz-corrupted',
+          courseBlockId: 'quiz-valid',
           _sum: {
             points: decimal(10),
           },
         },
+        {
+          courseBlockId: 'quiz-edited',
+          _sum: {
+            points: decimal(3),
+          },
+        },
       ]);
 
-      await expect(service.getStats()).rejects.toThrow(InternalServerErrorException);
+      const result = await service.getStats();
+
+      expect(result.averageQuizScore).toBe(0.8);
     });
   });
 });

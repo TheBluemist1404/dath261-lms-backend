@@ -4,7 +4,6 @@ import {
   ApiBearerAuth,
   ApiConflictResponse,
   ApiForbiddenResponse,
-  ApiInternalServerErrorResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -172,9 +171,6 @@ export class AdminController {
   })
   @ApiForbiddenResponse({
     description: 'Admin role required.',
-  })
-  @ApiInternalServerErrorResponse({
-    description: 'Invalid quiz scoring data encountered while calculating platform statistics.',
   })
   getStats() {
     return this.adminService.getStats();
