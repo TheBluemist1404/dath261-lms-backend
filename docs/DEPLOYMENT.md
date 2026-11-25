@@ -70,7 +70,8 @@ From then on, every schema change ships as a migration and Render applies it on 
 ## Demo data
 
 `pnpm db:seed:dev` adds fixed demo rows. Rows have fixed ids, so running it again leaves existing data
-alone. It refuses to run when `NODE_ENV=production`, so set `NODE_ENV=development` for that one command
+alone. The one exception is the seed's own course blocks: a rerun puts them back in seed order and adds
+content keys they are missing, so a database seeded by an older version gets the new demo content. It refuses to run when `NODE_ENV=production`, so set `NODE_ENV=development` for that one command
 when seeding the hosted database on purpose.
 
 Every account uses the password `password123`:
@@ -80,6 +81,11 @@ Every account uses the password `password123`:
 | Student | `student@dath261.dev` | Enrolled in Algorithms; owns the "Algorithms study group" workspace |
 | Student | `classmate@dath261.dev` | Member of the study group, for collaboration demos |
 | Lecturer | `lecturer@dath261.dev` | Owns Algorithms, Databases (published) and Compilers (draft) |
+
+Algorithms has a Markdown text lesson, a slides file, a lecture video (a workspace page references it at
+1:35) and "Quiz 1": three auto-graded questions (single choice, true/false, multiple choice), three
+attempts, best score counts. The answers are a queue, false, and Prim's + Kruskal's. Databases has a text
+lesson and a handout, so it can be used for a fresh enrollment.
 | Admin | `admin@dath261.dev` | Admin screens only; admins have no workspace |
 
 ## Resetting a local database

@@ -28,19 +28,103 @@ const courses = [
   ['seed-course-draft', 'Compilers (draft)', 'DRAFT'],
 ];
 
+// Content follows the block content contract: TEXT {text} (Markdown), VIDEO {url, durationSeconds},
+// FILE {url, fileName, sizeBytes}. The quiz block gets its questions further down.
 const blocks = [
-  ['seed-block-slides', 'seed-course-algorithms', 'FILE', 'Week 1 slides', 0, null],
+  [
+    'seed-block-intro',
+    'seed-course-algorithms',
+    'TEXT',
+    'Welcome to Algorithms',
+    0,
+    {
+      text: [
+        '# Welcome',
+        'This course covers **graph search**, shortest paths and greedy algorithms.',
+        '## How to use this course',
+        '- Read each lesson, then mark it complete.',
+        '- Watch the lecture and take *Quiz 1* at the end.',
+      ].join('\n'),
+    },
+  ],
+  [
+    'seed-block-slides',
+    'seed-course-algorithms',
+    'FILE',
+    'Week 1 slides',
+    1,
+    {
+      url: 'https://example.com/dath261/week-1-slides.pdf',
+      fileName: 'week-1-slides.pdf',
+      sizeBytes: 482133,
+    },
+  ],
   [
     'seed-block-lecture',
     'seed-course-algorithms',
     'VIDEO',
     'Graph search lecture',
-    1,
-    { durationSeconds: 754 },
+    2,
+    { url: 'https://example.com/dath261/graph-search.mp4', durationSeconds: 754 },
   ],
-  ['seed-block-quiz', 'seed-course-algorithms', 'QUIZ', 'Quiz 1', 2, null],
-  ['seed-block-normal-forms', 'seed-course-databases', 'FILE', 'Normal forms handout', 0, null],
+  ['seed-block-quiz', 'seed-course-algorithms', 'QUIZ', 'Quiz 1', 3, null],
+  [
+    'seed-block-databases-intro',
+    'seed-course-databases',
+    'TEXT',
+    'What is a relational database?',
+    0,
+    { text: 'Tables, keys and the **relational model**.' },
+  ],
+  [
+    'seed-block-normal-forms',
+    'seed-course-databases',
+    'FILE',
+    'Normal forms handout',
+    1,
+    {
+      url: 'https://example.com/dath261/normal-forms.pdf',
+      fileName: 'normal-forms.pdf',
+      sizeBytes: 120400,
+    },
+  ],
   ['seed-block-draft', 'seed-course-draft', 'FILE', 'Parsing notes', 0, null],
+];
+
+// Quiz 1 is auto-graded: three questions worth 1 point each, three attempts, best score counts.
+const quizQuestions = [
+  [
+    'seed-question-bfs',
+    'SINGLE_CHOICE',
+    'Which data structure does breadth-first search use?',
+    0,
+    null,
+    [
+      ['seed-option-bfs-queue', 'A queue', true],
+      ['seed-option-bfs-stack', 'A stack', false],
+      ['seed-option-bfs-heap', 'A heap', false],
+    ],
+  ],
+  [
+    'seed-question-dijkstra',
+    'TRUE_FALSE',
+    "Dijkstra's algorithm works with negative edge weights.",
+    1,
+    false,
+    [],
+  ],
+  [
+    'seed-question-greedy',
+    'MULTIPLE_CHOICE',
+    'Which of these are greedy algorithms?',
+    2,
+    null,
+    [
+      ['seed-option-greedy-prim', "Prim's algorithm", true],
+      ['seed-option-greedy-kruskal', "Kruskal's algorithm", true],
+      ['seed-option-greedy-floyd', 'Floyd-Warshall', false],
+    ],
+  ],
 ];
 
 // The student is enrolled in Algorithms only, so Databases references show as locked.
@@ -88,12 +172,40 @@ try {
       [id, title, status],
     );
   }
+  // Seed blocks made by an older seed had less content and other positions: add the missing
+  // content keys (keys already there win) and put the seed blocks back in seed order.
   for (const [id, courseId, type, title, position, content] of blocks) {
     await client.query(
       `INSERT INTO course_blocks (id, course_id, type, title, position, content, updated_at)
-       VALUES ($1, $2, $3::"BlockType", $4, $5, $6, now()) ON CONFLICT DO NOTHING`,
+       VALUES ($1, $2, $3::"BlockType", $4, $5, $6, now())
+       ON CONFLICT (id) DO UPDATE SET
+         position = EXCLUDED.position,
+         content = COALESCE(
+           EXCLUDED.content || course_blocks.content,
+           course_blocks.content,
+           EXCLUDED.content
+         )`,
       [id, courseId, type, title, position, content],
     );
+  }
+  await client.query(
+    `INSERT INTO quiz_configs (id, course_block_id, max_attempts, scoring_mode, updated_at)
+     VALUES ('seed-quiz-config', 'seed-block-quiz', 3, 'HIGHEST'::"QuizScoringMode", now())
+     ON CONFLICT DO NOTHING`,
+  );
+  for (const [id, type, text, position, correctBoolean, options] of quizQuestions) {
+    await client.query(
+      `INSERT INTO quiz_questions (id, course_block_id, type, text, points, position, correct_boolean, updated_at)
+       VALUES ($1, 'seed-block-quiz', $2::"QuestionType", $3, 1, $4, $5, now()) ON CONFLICT DO NOTHING`,
+      [id, type, text, position, correctBoolean],
+    );
+    for (const [index, [optionId, optionText, isCorrect]] of options.entries()) {
+      await client.query(
+        `INSERT INTO quiz_options (id, question_id, text, is_correct, position)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+        [optionId, id, optionText, isCorrect, index],
+      );
+    }
   }
   for (const [id, userId, courseId] of enrollments) {
     await client.query(
