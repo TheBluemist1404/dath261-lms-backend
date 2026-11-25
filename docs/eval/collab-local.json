@@ -1,0 +1,400 @@
+{
+  "api": "http://localhost:3001",
+  "startedAt": "2026-11-25T07:09:59.753Z",
+  "convergence": {
+    "clients": 3,
+    "editsPerClient": 50,
+    "runs": 20,
+    "passed": 20,
+    "convergeMsMedian": 0,
+    "convergeMsMax": 11,
+    "results": [
+      {
+        "run": 1,
+        "identical": true,
+        "persisted": true,
+        "length": 397,
+        "editMs": 82,
+        "convergeMs": 10
+      },
+      {
+        "run": 2,
+        "identical": true,
+        "persisted": true,
+        "length": 449,
+        "editMs": 51,
+        "convergeMs": 10
+      },
+      {
+        "run": 3,
+        "identical": true,
+        "persisted": true,
+        "length": 442,
+        "editMs": 67,
+        "convergeMs": 10
+      },
+      {
+        "run": 4,
+        "identical": true,
+        "persisted": true,
+        "length": 380,
+        "editMs": 62,
+        "convergeMs": 10
+      },
+      {
+        "run": 5,
+        "identical": true,
+        "persisted": true,
+        "length": 427,
+        "editMs": 69,
+        "convergeMs": 11
+      },
+      {
+        "run": 6,
+        "identical": true,
+        "persisted": true,
+        "length": 380,
+        "editMs": 71,
+        "convergeMs": 0
+      },
+      {
+        "run": 7,
+        "identical": true,
+        "persisted": true,
+        "length": 338,
+        "editMs": 73,
+        "convergeMs": 11
+      },
+      {
+        "run": 8,
+        "identical": true,
+        "persisted": true,
+        "length": 452,
+        "editMs": 67,
+        "convergeMs": 10
+      },
+      {
+        "run": 9,
+        "identical": true,
+        "persisted": true,
+        "length": 369,
+        "editMs": 62,
+        "convergeMs": 11
+      },
+      {
+        "run": 10,
+        "identical": true,
+        "persisted": true,
+        "length": 327,
+        "editMs": 91,
+        "convergeMs": 0
+      },
+      {
+        "run": 11,
+        "identical": true,
+        "persisted": true,
+        "length": 421,
+        "editMs": 65,
+        "convergeMs": 0
+      },
+      {
+        "run": 12,
+        "identical": true,
+        "persisted": true,
+        "length": 426,
+        "editMs": 73,
+        "convergeMs": 0
+      },
+      {
+        "run": 13,
+        "identical": true,
+        "persisted": true,
+        "length": 315,
+        "editMs": 68,
+        "convergeMs": 0
+      },
+      {
+        "run": 14,
+        "identical": true,
+        "persisted": true,
+        "length": 379,
+        "editMs": 80,
+        "convergeMs": 0
+      },
+      {
+        "run": 15,
+        "identical": true,
+        "persisted": true,
+        "length": 368,
+        "editMs": 57,
+        "convergeMs": 0
+      },
+      {
+        "run": 16,
+        "identical": true,
+        "persisted": true,
+        "length": 375,
+        "editMs": 72,
+        "convergeMs": 0
+      },
+      {
+        "run": 17,
+        "identical": true,
+        "persisted": true,
+        "length": 358,
+        "editMs": 80,
+        "convergeMs": 0
+      },
+      {
+        "run": 18,
+        "identical": true,
+        "persisted": true,
+        "length": 373,
+        "editMs": 67,
+        "convergeMs": 0
+      },
+      {
+        "run": 19,
+        "identical": true,
+        "persisted": true,
+        "length": 404,
+        "editMs": 71,
+        "convergeMs": 0
+      },
+      {
+        "run": 20,
+        "identical": true,
+        "persisted": true,
+        "length": 357,
+        "editMs": 61,
+        "convergeMs": 11
+      }
+    ]
+  },
+  "latency": {
+    "probesPerWriter": 200,
+    "intervalMs": 50,
+    "rows": [
+      {
+        "clients": 2,
+        "delivered": "200/200",
+        "connectAllMs": 9,
+        "p50": 1.1,
+        "p95": 1.4,
+        "max": 2.2
+      },
+      {
+        "clients": 3,
+        "delivered": "400/400",
+        "connectAllMs": 18,
+        "p50": 1,
+        "p95": 1.6,
+        "max": 3.4
+      },
+      {
+        "clients": 5,
+        "delivered": "800/800",
+        "connectAllMs": 34,
+        "p50": 1.1,
+        "p95": 1.5,
+        "max": 3.4
+      }
+    ]
+  },
+  "reconnect": {
+    "runs": 20,
+    "passed": 20,
+    "divergedWhileOffline": 20,
+    "editsWhileOffline": 20,
+    "mergeMsMedian": 16,
+    "mergeMsMax": 18,
+    "results": [
+      {
+        "run": 1,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 17
+      },
+      {
+        "run": 2,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 15
+      },
+      {
+        "run": 3,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 15
+      },
+      {
+        "run": 4,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 15
+      },
+      {
+        "run": 5,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 16
+      },
+      {
+        "run": 6,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 18
+      },
+      {
+        "run": 7,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 16
+      },
+      {
+        "run": 8,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 14
+      },
+      {
+        "run": 9,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 15
+      },
+      {
+        "run": 10,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 16
+      },
+      {
+        "run": 11,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 16
+      },
+      {
+        "run": 12,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 15
+      },
+      {
+        "run": 13,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 14
+      },
+      {
+        "run": 14,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 16
+      },
+      {
+        "run": 15,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 16
+      },
+      {
+        "run": 16,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 15
+      },
+      {
+        "run": 17,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 14
+      },
+      {
+        "run": 18,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 16
+      },
+      {
+        "run": 19,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 16
+      },
+      {
+        "run": 20,
+        "diverged": true,
+        "lost": 0,
+        "mergeMs": 17
+      }
+    ]
+  },
+  "authorization": {
+    "cases": [
+      {
+        "case": "Non-member of the workspace",
+        "outcome": "refused",
+        "expected": "refused",
+        "pass": true
+      },
+      {
+        "case": "Empty token",
+        "outcome": "refused",
+        "expected": "refused",
+        "pass": true
+      },
+      {
+        "case": "Malformed token",
+        "outcome": "refused",
+        "expected": "refused",
+        "pass": true
+      },
+      {
+        "case": "Member token with a forged signature",
+        "outcome": "refused",
+        "expected": "refused",
+        "pass": true
+      },
+      {
+        "case": "Unknown page id",
+        "outcome": "refused",
+        "expected": "refused",
+        "pass": true
+      },
+      {
+        "case": "Member removed while connected",
+        "outcome": "disconnected",
+        "expected": "disconnected",
+        "pass": true
+      },
+      {
+        "case": "Removed member reconnects",
+        "outcome": "refused",
+        "expected": "refused",
+        "pass": true
+      },
+      {
+        "case": "Another user opens a personal page",
+        "outcome": "refused",
+        "expected": "refused",
+        "pass": true
+      },
+      {
+        "case": "Owner opens their personal page over the socket",
+        "outcome": "refused",
+        "expected": "refused",
+        "pass": true
+      },
+      {
+        "case": "Edit sent to an archived page",
+        "outcome": "read-only, not stored",
+        "expected": "read-only, not stored",
+        "pass": true
+      }
+    ],
+    "passed": 10,
+    "total": 10
+  }
+}

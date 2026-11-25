@@ -32,6 +32,7 @@
     "db:studio": "prisma studio",
     "db:seed:dev": "node scripts/seed-dev.mjs",
     "db:reset:dev": "node scripts/reset-dev.mjs",
+    "eval:collab": "node scripts/eval-collab.mjs",
     "db:check-migrations": "prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/ --exit-code",
     "ci": "pnpm check && pnpm prisma:validate && pnpm typecheck && pnpm test && pnpm test:e2e && pnpm build",
     "postinstall": "prisma generate",
